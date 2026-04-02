@@ -1,0 +1,662 @@
+
+{
+  "name": "MCP - SERVER",
+  "nodes": [
+    {
+      "parameters": {
+        "path": "9d9fa204-dbcd-4fa4-aa4e-99cccdeaa556"
+      },
+      "type": "@n8n/n8n-nodes-langchain.mcpTrigger",
+      "typeVersion": 2,
+      "position": [
+        -816,
+        -656
+      ],
+      "id": "93989857-0d3b-4734-90d8-6f1340547727",
+      "name": "MCP Server Trigger",
+      "webhookId": "9d9fa204-dbcd-4fa4-aa4e-99cccdeaa556"
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "1zt4h2v3ldK3zELNNmvyn02elEB9dHdfXD5q85ZYh2k0",
+          "mode": "list",
+          "cachedResultName": "Base Alura MCP",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1zt4h2v3ldK3zELNNmvyn02elEB9dHdfXD5q85ZYh2k0/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Autopeças",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1zt4h2v3ldK3zELNNmvyn02elEB9dHdfXD5q85ZYh2k0/edit#gid=0"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheetsTool",
+      "typeVersion": 4.7,
+      "position": [
+        -1152,
+        -416
+      ],
+      "id": "f78ac2c2-b4b7-4e0e-9995-267b7aa2809e",
+      "name": "Base de Dados AutoPeças",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "zngLTJVbFJzXidRV",
+          "name": "Lucas Mendes"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "1zt4h2v3ldK3zELNNmvyn02elEB9dHdfXD5q85ZYh2k0",
+          "mode": "list",
+          "cachedResultName": "Base MCP",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1zt4h2v3ldK3zELNNmvyn02elEB9dHdfXD5q85ZYh2k0/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1562350974,
+          "mode": "list",
+          "cachedResultName": "Leitos",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1zt4h2v3ldK3zELNNmvyn02elEB9dHdfXD5q85ZYh2k0/edit#gid=1562350974"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheetsTool",
+      "typeVersion": 4.7,
+      "position": [
+        -1008,
+        -416
+      ],
+      "id": "69329355-0895-4ce0-8639-386c2f16ae18",
+      "name": "Base de Dados Leitos Hospital",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "zngLTJVbFJzXidRV",
+          "name": "Lucas Mendes"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "1zt4h2v3ldK3zELNNmvyn02elEB9dHdfXD5q85ZYh2k0",
+          "mode": "list",
+          "cachedResultName": "Base MCP",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1zt4h2v3ldK3zELNNmvyn02elEB9dHdfXD5q85ZYh2k0/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1562350974,
+          "mode": "list",
+          "cachedResultName": "Leitos",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1zt4h2v3ldK3zELNNmvyn02elEB9dHdfXD5q85ZYh2k0/edit#gid=1562350974"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Status_Limpeza": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Status_Limpeza', ``, 'string') }}",
+            "row_number": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('row_number__using_to_match_', ``, 'number') }}"
+          },
+          "matchingColumns": [
+            "row_number"
+          ],
+          "schema": [
+            {
+              "id": "ID_Leito",
+              "displayName": "ID_Leito",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "Quarto",
+              "displayName": "Quarto",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "Tipo_Quarto",
+              "displayName": "Tipo_Quarto",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "Status_Ocupacao",
+              "displayName": "Status_Ocupacao",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "Paciente",
+              "displayName": "Paciente",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "Ultima_Limpeza",
+              "displayName": "Ultima_Limpeza",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "Status_Limpeza",
+              "displayName": "Status_Limpeza",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "row_number",
+              "displayName": "row_number",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "readOnly": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheetsTool",
+      "typeVersion": 4.7,
+      "position": [
+        -848,
+        -416
+      ],
+      "id": "f04b3a03-3545-4674-b82f-027691c6dc6c",
+      "name": "Atualizar Base de Dados Hospital",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "zngLTJVbFJzXidRV",
+          "name": "Lucas Mendes"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('To', ``, 'string') }}",
+        "subject": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Subject', ``, 'string') }}",
+        "message": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Message', ``, 'string') }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.gmailTool",
+      "typeVersion": 2.1,
+      "position": [
+        -512,
+        -416
+      ],
+      "id": "f6341e5f-1d27-4a98-aa70-c0001e331e90",
+      "name": "Enviar Email",
+      "webhookId": "2f517e29-410d-4570-879e-cbaca5dcc108",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "NAo1w6q1jXsEAwoP",
+          "name": "Gmail account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chatTrigger",
+      "typeVersion": 1.4,
+      "position": [
+        -48,
+        -288
+      ],
+      "id": "9c330b76-b9bf-43bb-ab25-795942595b63",
+      "name": "When chat message received",
+      "webhookId": "346e51cf-a1ce-400f-923a-7503a5a58e6f"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "mode": "list",
+          "value": "gpt-4.1-mini"
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.3,
+      "position": [
+        -16,
+        -480
+      ],
+      "id": "767b4cae-e974-4d47-8588-82921a3943aa",
+      "name": "OpenAI Chat Model1",
+      "credentials": {
+        "openAiApi": {
+          "id": "18VPVBIhyDrB4naB",
+          "name": "OpenAi account 2"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
+      "typeVersion": 1.3,
+      "position": [
+        128,
+        -480
+      ],
+      "id": "28fdd70f-ff1c-4a6f-918d-6bb36c4b9b35",
+      "name": "Simple Memory1"
+    },
+    {
+      "parameters": {
+        "options": {
+          "systemMessage": "Você é um Agente Hospitalar Integrado, conectado ao MCP Client.\n\nSua função é auxiliar o corpo clínico e a administração hospitalar na gestão de leitos, limpeza e disponibilidade de quartos.\n\nInforme esse Menu de Análise no inicio:\n- Relatório de Leitos Disponíveis e Ocupados\n- Relatório de Ocupação de Leitos\n- Relatório de Status de Limpeza (Concluído e  Pendente)\n\n🎯 Instruções:\nSempre utilize o MCP Client para consultar ou atualizar informações em tempo real.\n\nBase de Dados que deve ser utilizada é \"Base de Dados Leitos\".\n\nVocê só pode ter acesso aos dados com Tipo_Quarto = Enfermaria\n"
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3,
+      "position": [
+        96,
+        -688
+      ],
+      "id": "48b912de-3572-4a2b-86bb-12c165ccb364",
+      "name": "Agent Enfermaria"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "mode": "list",
+          "value": "gpt-4.1-mini"
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.3,
+      "position": [
+        96,
+        -80
+      ],
+      "id": "dc6d909c-1a7b-4187-863d-0fb9bc6c73f9",
+      "name": "OpenAI Chat Model",
+      "credentials": {
+        "openAiApi": {
+          "id": "18VPVBIhyDrB4naB",
+          "name": "OpenAi account 2"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
+      "typeVersion": 1.3,
+      "position": [
+        208,
+        -80
+      ],
+      "id": "4e126971-7d56-40ca-976a-598394e15ab8",
+      "name": "Simple Memory"
+    },
+    {
+      "parameters": {
+        "options": {
+          "systemMessage": "Você é um Agente Hospitalar Integrado, conectado ao MCP Client.\n\nSua função é auxiliar o corpo clínico e a administração hospitalar na gestão de pacientes internados na UTI.\n\n🎯 Instruções:\nSempre utilize o MCP Client para consultar ou atualizar informações em tempo real.\n\nInforme Menu de Análise no inicio:\n- Relatório de Dias Internados \n- Relatório de Geral de Quantidade de Pacientes Internados \n\nBase de Dados que deve ser utilizada é \"Base de Dados Leitos\".\n\nVocê tem acesso apenas aos dados com Tipo_Quarto = UTI.\n"
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3,
+      "position": [
+        128,
+        -288
+      ],
+      "id": "912a8553-7045-4d27-8b1f-87cda3adc722",
+      "name": "Agent UTI"
+    },
+    {
+      "parameters": {
+        "from": "+18647139932",
+        "to": "+5511952767064",
+        "message": "Teste",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.twilioTool",
+      "typeVersion": 1,
+      "position": [
+        -624,
+        -416
+      ],
+      "id": "709c1659-f60e-4002-acf7-72bd476db7bb",
+      "name": "Enviar SMS",
+      "credentials": {
+        "twilioApi": {
+          "id": "qXctcHsQnXhpP4cy",
+          "name": "Twilio account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "endpointUrl": "https://n8ncursomcp.app.n8n.cloud/mcp/9d9fa204-dbcd-4fa4-aa4e-99cccdeaa556",
+        "include": "selected",
+        "includeTools": [
+          "Base_de_Dados_Leitos_Hospital",
+          "Enviar_Email",
+          "Enviar_SMS"
+        ],
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.mcpClientTool",
+      "typeVersion": 1.2,
+      "position": [
+        272,
+        -464
+      ],
+      "id": "a8607ab4-151c-4f9d-8021-1bdc7ef4e81f",
+      "name": "MCP Client"
+    },
+    {
+      "parameters": {
+        "options": {
+          "systemMessage": "Você é um Agente Hospitalar Integrado, conectado ao MCP Client.\n\nSua função é auxiliar o corpo clínico e a administração hospitalar na gestão de leitos, limpeza e disponibilidade de quartos.\n\n🎯 Instruções:\nSempre utilize o MCP Client para consultar ou atualizar informações em tempo real.\n\nBase de Dados que deve ser utilizada é \"Base de Dados Leitos\"."
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3,
+      "position": [
+        640,
+        -704
+      ],
+      "id": "1a6de4c6-b9aa-4b1f-9ba7-dbffd722a1cd",
+      "name": "Agent Diretoria"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "mode": "list",
+          "value": "gpt-4.1-mini"
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.3,
+      "position": [
+        576,
+        -512
+      ],
+      "id": "a5257d98-a7cd-4d87-9535-ab838447b7fd",
+      "name": "OpenAI Chat Model2",
+      "credentials": {
+        "openAiApi": {
+          "id": "18VPVBIhyDrB4naB",
+          "name": "OpenAi account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "contextWindowLength": 10
+      },
+      "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
+      "typeVersion": 1.3,
+      "position": [
+        720,
+        -512
+      ],
+      "id": "57513c17-c0b6-4a6c-95b9-2b64201642c9",
+      "name": "Simple Memory2"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.mcpClientTool",
+      "typeVersion": 1.2,
+      "position": [
+        880,
+        -512
+      ],
+      "id": "5926bb9c-65c7-466d-9f28-ef8fb3315c25",
+      "name": "MCP Client1",
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "endpointUrl": "https://n8ncursomcp.app.n8n.cloud/mcp/9d9fa204-dbcd-4fa4-aa4e-99cccdeaa556",
+        "include": "selected",
+        "includeTools": [
+          "Enviar_SMS",
+          "Enviar_Email",
+          "Base_de_Dados_Leitos_Hospital"
+        ],
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.mcpClientTool",
+      "typeVersion": 1.2,
+      "position": [
+        336,
+        -64
+      ],
+      "id": "d47e3796-e30a-4c1c-903e-1f4ef025c0bf",
+      "name": "MCP Client2"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Base de Dados AutoPeças": {
+      "ai_tool": [
+        [
+          {
+            "node": "MCP Server Trigger",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Base de Dados Leitos Hospital": {
+      "ai_tool": [
+        [
+          {
+            "node": "MCP Server Trigger",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Atualizar Base de Dados Hospital": {
+      "ai_tool": [
+        [
+          {
+            "node": "MCP Server Trigger",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enviar Email": {
+      "ai_tool": [
+        [
+          {
+            "node": "MCP Server Trigger",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When chat message received": {
+      "main": [
+        [
+          {
+            "node": "Agent UTI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Model1": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Agent Enfermaria",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Simple Memory1": {
+      "ai_memory": [
+        [
+          {
+            "node": "Agent Enfermaria",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Agent UTI",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Simple Memory": {
+      "ai_memory": [
+        [
+          {
+            "node": "Agent UTI",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enviar SMS": {
+      "ai_tool": [
+        [
+          {
+            "node": "MCP Server Trigger",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MCP Client": {
+      "ai_tool": [
+        [
+          {
+            "node": "Agent Enfermaria",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Model2": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Agent Diretoria",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Simple Memory2": {
+      "ai_memory": [
+        [
+          {
+            "node": "Agent Diretoria",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MCP Client1": {
+      "ai_tool": [
+        [
+          {
+            "node": "Agent Diretoria",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MCP Client2": {
+      "ai_tool": [
+        [
+          {
+            "node": "Agent UTI",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "207b36db-80a5-4c30-8f2b-94d76ac19ef1",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "d0e4bbca388d0fff09d4f2fdd4f094bfdb736646443b5555ed601fc250f9ed17"
+  },
+  "id": "wGsYfxP67iOgoIEO",
+  "tags": []
+}
+

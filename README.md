@@ -2,21 +2,21 @@
 
 ## mcp-autopeças com n8n
 
-MCP Server em Python que lê abas de uma planilha Google Sheets e expõe dados via protocolo MCP — compatível com Claude Desktop, Claude Code e qualquer MCP Client (inclusive o nó `mcpClientTool` do N8N).
+MCP Server em Python que lê e escreve em abas de uma planilha Google Sheets via protocolo MCP — compatível com Claude Desktop, Claude Code e qualquer MCP Client (inclusive o nó `mcpClientTool` do N8N).
 
 O servidor cobre dois domínios em um único processo, cada um mapeado para uma aba da mesma planilha:
 
 | Domínio | Aba | Tools |
 |---------|-----|-------|
-| AutoPeças (AutoMax) | `AutoPeças` | 6 tools de catálogo e estoque |
-| Leitos Hospitalares | `Leitos` | 6 tools de gestão e notificação |
+| AutoPeças (AutoMax) | `AutoPeças` (gid=0) | 6 tools — somente leitura |
+| Leitos Hospitalares | `Leitos` (gid=1562350974) | 9 tools — leitura, escrita, e-mail e SMS |
 
 ### Pré-requisitos
 
 - Python 3.12+
 - [`uv`](https://docs.astral.sh/uv/) (recomendado) ou `pip`
-- Conta Google com acesso à planilha
-- Service Account com permissão de leitura na planilha
+- Service Account Google com permissão de **Editor** na planilha
+  (necessário para `leitos_atualizar_status_limpeza`)
 
 ### Instalação
 
@@ -32,7 +32,7 @@ uv sync          # ou: pip install -e .
 No [Google Cloud Console](https://console.cloud.google.com):
 1. Crie um projeto → APIs & Services → Enable **Google Sheets API**
 2. Crie uma **Service Account** → gere e baixe a chave JSON
-3. Compartilhe a planilha com o e-mail da service account (permissão de leitor)
+3. Compartilhe a planilha com o e-mail da service account com permissão de **Editor**
 
 **2. Variáveis de ambiente**
 
@@ -44,17 +44,21 @@ Edite o `.env` com no mínimo:
 
 ```env
 SPREADSHEET_ID=1zt4h2v3ldK3zELNNmvyn02elEB9dHdfXD5q85ZYh2k0
-SHEET_NAME=AutoPeças
+AUTOPECAS_SHEET_NAME=AutoPeças
 LEITOS_SHEET_NAME=Leitos
 GOOGLE_CREDENTIALS_PATH=/caminho/para/service_account.json
 
-# Necessário apenas para leitos_enviar_notificacao:
+# Para leitos_enviar_notificacao (e-mail):
 GMAIL_USER=setor@hospital.com.br
 GMAIL_APP_PASSWORD=xxxx_xxxx_xxxx_xxxx
+
+# Para leitos_enviar_sms:
+TWILIO_ACCOUNT_SID=ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+TWILIO_AUTH_TOKEN=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+TWILIO_FROM_NUMBER=+18647139932
 ```
 
-> O `SPREADSHEET_ID` está na URL da planilha:
-> `docs.google.com/spreadsheets/d/**{ID}**/edit`
+> O `SPREADSHEET_ID` está na URL: `docs.google.com/spreadsheets/d/**{ID}**/edit`
 
 ### Estrutura esperada da planilha
 
@@ -64,14 +68,14 @@ GMAIL_APP_PASSWORD=xxxx_xxxx_xxxx_xxxx
 |--------|------|-----------|-------|-------|---------|------------|-----------|-------------|
 | F-1023 | Filtro de Óleo | Motor | Bosch | 35.90 | 48 | AutoDist | ... | Prateleira A3 |
 
-**Aba `Leitos`:**
+**Aba `Leitos`** — colunas confirmadas pelo schema do nó N8N:
 
-| Leito | Tipo_Quarto | Status | Paciente | Setor | Data_Internacao | Previsao_Alta | Medico | Observacoes |
-|-------|-------------|--------|----------|-------|-----------------|---------------|--------|-------------|
-| A-101 | Enfermaria | Ocupado | João Silva | Ortopedia | 2025-03-28 | 2025-04-05 | Dr. Costa | Pós-op |
-| UTI-03 | UTI | Disponível | — | UTI Adulto | — | — | — | — |
+| ID_Leito | Quarto | Tipo_Quarto | Status_Ocupacao | Status_Limpeza | Paciente | Ultima_Limpeza |
+|----------|--------|-------------|-----------------|----------------|----------|----------------|
+| A-101 | Quarto 10 | Enfermaria | Ocupado | Concluído | João Silva | 2025-03-28 |
+| UTI-05 | UTI Norte | UTI | Disponível | Pendente | — | 2025-03-27 |
 
-> Os nomes das colunas de ambas as abas podem ser ajustados no `.env` com `COL_*` e `LEITOS_COL_*`.
+> Os nomes das colunas podem ser ajustados no `.env` com `COL_*` e `LEITOS_COL_*`.
 
 ---
 
@@ -88,24 +92,31 @@ GMAIL_APP_PASSWORD=xxxx_xxxx_xxxx_xxxx
 
 ### Ferramentas Leitos Hospitalares
 
-Mapeamento dos agentes N8N para tools Python:
+Mapeamento dos agentes N8N (`mcp-all-nodes.json`) para tools Python:
 
-| Agent N8N | Equivalente MCP |
-|-----------|-----------------|
-| Agent Diretoria (acesso total) | `leitos_listar_leitos`, `leitos_resumo_ocupacao`, `leitos_verificar_disponibilidade`, `leitos_obter_detalhes_leito` |
-| Agent Diretoria (Gmail `Enviar`) | `leitos_enviar_notificacao` |
-| Agent Enfermaria (filtro `Tipo_Quarto=Enfermaria`) | `leitos_listar_enfermaria` |
+| Agent N8N | Filtro | Tools equivalentes |
+|-----------|--------|--------------------|
+| Agent Diretoria | Acesso total | `leitos_listar_leitos`, `leitos_resumo_ocupacao`, `leitos_verificar_disponibilidade`, `leitos_obter_detalhes_leito` |
+| Agent Enfermaria | `Tipo_Quarto = Enfermaria` | `leitos_listar_enfermaria` |
+| Agent UTI | `Tipo_Quarto = UTI` | `leitos_listar_uti` |
+| Todos os agentes | — | `leitos_enviar_notificacao`, `leitos_enviar_sms` |
+| Nó de escrita N8N | `row_number` → `ID_Leito` | `leitos_atualizar_status_limpeza` |
 
-| Tool | O que faz |
-|------|-----------|
-| `leitos_listar_leitos` | Lista todos os leitos com filtros por tipo, status e setor |
-| `leitos_listar_enfermaria` | Lista apenas leitos de Enfermaria (filtro fixo, como o Agent Enfermaria) |
-| `leitos_verificar_disponibilidade` | Leitos com status Disponível, com resumo por tipo de quarto |
-| `leitos_obter_detalhes_leito` | Dados completos de um leito pelo ID |
-| `leitos_resumo_ocupacao` | Dashboard de ocupação agrupado por tipo de quarto e status |
-| `leitos_enviar_notificacao` | Envia e-mail via Gmail SMTP (equivale ao `gmailTool` do N8N) |
+| Tool | Leitura/Escrita | O que faz |
+|------|-----------------|-----------|
+| `leitos_listar_leitos` | Leitura | Lista todos os leitos; filtrável por `Tipo_Quarto`, `Status_Ocupacao`, `Status_Limpeza` |
+| `leitos_listar_enfermaria` | Leitura | Filtro fixo `Tipo_Quarto=Enfermaria` — relatórios de ocupação e limpeza |
+| `leitos_listar_uti` | Leitura | Filtro fixo `Tipo_Quarto=UTI` — dias internados e contagem de pacientes |
+| `leitos_verificar_disponibilidade` | Leitura | Leitos com `Status_Ocupacao=Disponível`, resumo por tipo |
+| `leitos_obter_detalhes_leito` | Leitura | Dados completos de um leito pelo `ID_Leito` |
+| `leitos_resumo_ocupacao` | Leitura | Dashboard: ocupação **e** limpeza agrupados por `Tipo_Quarto` |
+| `leitos_atualizar_status_limpeza` | **Escrita** | Atualiza `Status_Limpeza` de um leito pelo `ID_Leito` |
+| `leitos_enviar_notificacao` | Externo | Envia e-mail via Gmail SMTP |
+| `leitos_enviar_sms` | Externo | Envia SMS via Twilio REST API |
 
-**Status possíveis:** `Disponível` 🟢 · `Ocupado` 🔴 · `Limpeza` 🟡 · `Manutenção` 🔧 · `Reservado` 🔵
+**Status_Ocupacao:** `Disponível` 🟢 · `Ocupado` 🔴 · `Reservado` 🔵
+
+**Status_Limpeza:** `Concluído` ✅ · `Pendente` ⚠️ · `Em Andamento` 🔄
 
 **Tipos de quarto:** `Enfermaria` · `UTI` · `Apartamento` · `Semi-Intensivo`
 
@@ -116,6 +127,14 @@ A tool `leitos_enviar_notificacao` usa Gmail SMTP com Senha de App:
 1. Ative a verificação em duas etapas na conta Google
 2. Acesse [myaccount.google.com/apppasswords](https://myaccount.google.com/apppasswords)
 3. Crie uma senha para "Email" e cole em `GMAIL_APP_PASSWORD` no `.env`
+
+#### Configurando o envio de SMS
+
+A tool `leitos_enviar_sms` usa a [API REST do Twilio](https://www.twilio.com/docs/sms):
+
+1. Crie uma conta em [twilio.com](https://www.twilio.com)
+2. Obtenha `Account SID` e `Auth Token` no dashboard
+3. Registre ou compre um número remetente e configure `TWILIO_FROM_NUMBER`
 
 ---
 
@@ -131,11 +150,14 @@ Adicione ao `~/Library/Application Support/Claude/claude_desktop_config.json`:
       "args": ["run", "--project", "/caminho/para/mcp-alura", "python", "server.py"],
       "env": {
         "SPREADSHEET_ID": "1zt4h2v3ldK3zELNNmvyn02elEB9dHdfXD5q85ZYh2k0",
-        "SHEET_NAME": "AutoPeças",
+        "AUTOPECAS_SHEET_NAME": "AutoPeças",
         "LEITOS_SHEET_NAME": "Leitos",
         "GOOGLE_CREDENTIALS_PATH": "/caminho/para/service_account.json",
         "GMAIL_USER": "setor@hospital.com.br",
-        "GMAIL_APP_PASSWORD": "xxxx_xxxx_xxxx_xxxx"
+        "GMAIL_APP_PASSWORD": "xxxx_xxxx_xxxx_xxxx",
+        "TWILIO_ACCOUNT_SID": "ACxxxxxxxx",
+        "TWILIO_AUTH_TOKEN": "xxxxxxxx",
+        "TWILIO_FROM_NUMBER": "+18647139932"
       }
     }
   }
@@ -150,17 +172,9 @@ claude mcp add hospital-mcp -- uv run --project /caminho/para/mcp-alura python s
 
 ### Uso no N8N (MCP Client)
 
-Configure o nó `MCP Client Tool` apontando para o endpoint do servidor (modo HTTP)
-ou para o script local (modo stdio). Os dois agentes N8N podem compartilhar o mesmo
-servidor MCP — cada um usará as tools adequadas ao seu papel:
-
-```
-# Agent Diretoria
-Utilize o MCP para consultar todos os leitos e enviar notificações por e-mail.
-
-# Agent Enfermaria
-Utilize leitos_listar_enfermaria para ver apenas leitos de Enfermaria.
-```
+Configure o nó `MCP Client Tool` apontando para o endpoint do servidor.
+Os três agentes N8N podem compartilhar o mesmo servidor MCP Python,
+cada um utilizando as tools adequadas ao seu papel via `include: selected`.
 
 ### Teste local
 
@@ -168,7 +182,7 @@ Utilize leitos_listar_enfermaria para ver apenas leitos de Enfermaria.
 uv run python server.py
 ```
 
-Para inspecionar as 12 tools com o MCP Inspector:
+Para inspecionar as 15 tools com o MCP Inspector:
 
 ```bash
 npx @modelcontextprotocol/inspector uv run python server.py

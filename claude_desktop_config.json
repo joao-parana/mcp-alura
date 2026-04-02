@@ -12,7 +12,7 @@
       ],
       "env": {
         "SPREADSHEET_ID": "seu_spreadsheet_id_aqui",
-        "SHEET_NAME": "AutoPeças",
+        "AUTOPECAS_SHEET_NAME": "AutoPeças",
         "GOOGLE_CREDENTIALS_PATH": "/caminho/para/service_account.json"
       }
     }

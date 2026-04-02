@@ -4,23 +4,34 @@ MCP Server - AutoMax & Leitos Hospitalares
 
 Servidor MCP com dois domínios de dados via Google Sheets (mesma planilha, abas distintas):
 
-  • AutoPeças (AutoMax) — aba configurada em SHEET_NAME
+  • AutoPeças (AutoMax) — aba configurada em AUTOPECAS_SHEET_NAME
       Ferramentas: busca, listagem, detalhes, categorias, estoque, marcas.
 
   • Leitos Hospitalares — aba configurada em LEITOS_SHEET_NAME
-      Ferramentas: listagem geral, enfermaria, disponibilidade, detalhes de leito,
-      resumo de ocupação e envio de notificações por e-mail (Gmail SMTP).
-      Espelha os dois agentes N8N: Agent Diretoria (acesso total + e-mail) e
-      Agent Enfermaria (filtrado por Tipo_Quarto = "Enfermaria").
+      Ferramentas: listagem geral, enfermaria, UTI, disponibilidade, detalhes,
+      resumo de ocupação, atualização de status de limpeza (escrita),
+      e envio de notificações por e-mail (Gmail SMTP) e SMS (Twilio).
+
+      Espelha os três agentes N8N definidos em mcp-all-nodes.json:
+        - Agent Diretoria  → acesso total + e-mail + SMS
+        - Agent Enfermaria → Tipo_Quarto = Enfermaria + e-mail + SMS
+        - Agent UTI        → Tipo_Quarto = UTI + e-mail + SMS
 
 Configuração via .env:
     SPREADSHEET_ID          - ID da planilha Google Sheets compartilhada
-    SHEET_NAME              - Aba de autopeças    (padrão: "AutoPeças")
+    AUTOPECAS_SHEET_NAME    - Aba de autopeças    (padrão: "AutoPeças")
     LEITOS_SHEET_NAME       - Aba de leitos       (padrão: "Leitos")
     GOOGLE_CREDENTIALS_PATH - Caminho para o JSON da Service Account
     GOOGLE_CREDENTIALS_JSON - JSON da Service Account como string (alternativa)
     GMAIL_USER              - E-mail remetente para notificações
     GMAIL_APP_PASSWORD      - Senha de App do Gmail (SMTP)
+    TWILIO_ACCOUNT_SID      - SID da conta Twilio
+    TWILIO_AUTH_TOKEN       - Auth Token da conta Twilio
+    TWILIO_FROM_NUMBER      - Número remetente Twilio (ex: '+18647139932')
+
+Nota: como o servidor inclui operações de escrita na aba Leitos
+(atualização de Status_Limpeza), a Service Account deve ter permissão
+de EDITOR na planilha (não apenas leitor).
 """
 
 import json
@@ -35,6 +46,7 @@ from functools import lru_cache
 from typing import Any, Optional
 
 import gspread
+import httpx
 from dotenv import load_dotenv
 from google.oauth2.service_account import Credentials
 from mcp.server.fastmcp import FastMCP
@@ -49,16 +61,16 @@ load_dotenv()
 logging.basicConfig(stream=sys.stderr, level=logging.INFO)
 logger = logging.getLogger("mcp-server")
 
-# Escopos necessários para leitura do Google Sheets
+# Escopo com leitura E escrita em Sheets (necessário para atualizar Status_Limpeza)
 SCOPES = [
-    "https://www.googleapis.com/auth/spreadsheets.readonly",
+    "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/drive.readonly",
 ]
 
 SPREADSHEET_ID: str = os.getenv("SPREADSHEET_ID", "")
 
 # --- AutoPeças ---
-SHEET_NAME: str = os.getenv("SHEET_NAME", "AutoPeças")
+AUTOPECAS_SHEET_NAME: str = os.getenv("AUTOPECAS_SHEET_NAME", "AutoPeças")
 COL_CODIGO: str = os.getenv("COL_CODIGO", "Código")
 COL_NOME: str = os.getenv("COL_NOME", "Nome")
 COL_CATEGORIA: str = os.getenv("COL_CATEGORIA", "Categoria")
@@ -70,12 +82,16 @@ COL_DESCRICAO: str = os.getenv("COL_DESCRICAO", "Descrição")
 COL_LOCALIZACAO: str = os.getenv("COL_LOCALIZACAO", "Localização")
 
 # --- Leitos Hospitalares ---
+# Nomes confirmados pelo schema do nó "Atualizar Base de Dados Hospital" (mcp-all-nodes.json)
 LEITOS_SHEET_NAME: str = os.getenv("LEITOS_SHEET_NAME", "Leitos")
-LEITOS_COL_LEITO: str = os.getenv("LEITOS_COL_LEITO", "Leito")
+LEITOS_COL_LEITO: str = os.getenv("LEITOS_COL_LEITO", "ID_Leito")
+LEITOS_COL_QUARTO: str = os.getenv("LEITOS_COL_QUARTO", "Quarto")
 LEITOS_COL_TIPO_QUARTO: str = os.getenv("LEITOS_COL_TIPO_QUARTO", "Tipo_Quarto")
-LEITOS_COL_STATUS: str = os.getenv("LEITOS_COL_STATUS", "Status")
+LEITOS_COL_STATUS_OCUPACAO: str = os.getenv("LEITOS_COL_STATUS_OCUPACAO", "Status_Ocupacao")
+LEITOS_COL_STATUS_LIMPEZA: str = os.getenv("LEITOS_COL_STATUS_LIMPEZA", "Status_Limpeza")
 LEITOS_COL_PACIENTE: str = os.getenv("LEITOS_COL_PACIENTE", "Paciente")
-LEITOS_COL_SETOR: str = os.getenv("LEITOS_COL_SETOR", "Setor")
+LEITOS_COL_ULTIMA_LIMPEZA: str = os.getenv("LEITOS_COL_ULTIMA_LIMPEZA", "Ultima_Limpeza")
+# Colunas opcionais — podem existir na planilha real mas não estão no schema do update
 LEITOS_COL_DATA_INTERNACAO: str = os.getenv("LEITOS_COL_DATA_INTERNACAO", "Data_Internacao")
 LEITOS_COL_PREVISAO_ALTA: str = os.getenv("LEITOS_COL_PREVISAO_ALTA", "Previsao_Alta")
 LEITOS_COL_MEDICO: str = os.getenv("LEITOS_COL_MEDICO", "Medico")
@@ -84,6 +100,11 @@ LEITOS_COL_OBSERVACOES: str = os.getenv("LEITOS_COL_OBSERVACOES", "Observacoes")
 # --- Gmail SMTP ---
 GMAIL_USER: str = os.getenv("GMAIL_USER", "")
 GMAIL_APP_PASSWORD: str = os.getenv("GMAIL_APP_PASSWORD", "")
+
+# --- Twilio SMS ---
+TWILIO_ACCOUNT_SID: str = os.getenv("TWILIO_ACCOUNT_SID", "")
+TWILIO_AUTH_TOKEN: str = os.getenv("TWILIO_AUTH_TOKEN", "")
+TWILIO_FROM_NUMBER: str = os.getenv("TWILIO_FROM_NUMBER", "")
 
 # ---------------------------------------------------------------------------
 # Cliente Google Sheets
@@ -119,11 +140,11 @@ def _get_worksheet(sheet_name: str) -> gspread.Worksheet:
 
 def _get_sheet() -> gspread.Worksheet:
     """Worksheet da aba AutoPeças."""
-    return _get_worksheet(SHEET_NAME)
+    return _get_worksheet(AUTOPECAS_SHEET_NAME)
 
 
 def _get_leitos_sheet() -> gspread.Worksheet:
-    """Worksheet da aba Leitos."""
+    """Worksheet da aba Leitos (leitura e escrita)."""
     return _get_worksheet(LEITOS_SHEET_NAME)
 
 
@@ -165,7 +186,7 @@ def _paginar(items: list, limit: int, offset: int) -> dict[str, Any]:
 
 def _handle_error(e: Exception, sheet_name: str = "") -> str:
     """Formata erros de forma clara e acionável."""
-    aba = sheet_name or SHEET_NAME
+    aba = sheet_name or AUTOPECAS_SHEET_NAME
     if isinstance(e, EnvironmentError):
         return f"Erro de configuração: {e}"
     if isinstance(e, gspread.exceptions.SpreadsheetNotFound):
@@ -246,8 +267,8 @@ def _formatar_peca_markdown(r: dict[str, Any]) -> str:
 def _filtrar_leitos(
     registros: list[dict[str, Any]],
     tipo_quarto: Optional[str] = None,
-    status: Optional[str] = None,
-    setor: Optional[str] = None,
+    status_ocupacao: Optional[str] = None,
+    status_limpeza: Optional[str] = None,
 ) -> list[dict[str, Any]]:
     """Aplica filtros combinados sobre registros de leitos."""
     resultado = registros
@@ -255,27 +276,36 @@ def _filtrar_leitos(
     if tipo_quarto:
         tq = _normalizar(tipo_quarto)
         resultado = [r for r in resultado if _normalizar(str(r.get(LEITOS_COL_TIPO_QUARTO, ""))) == tq]
-    if status:
-        st = _normalizar(status)
-        resultado = [r for r in resultado if _normalizar(str(r.get(LEITOS_COL_STATUS, ""))) == st]
-    if setor:
-        se = _normalizar(setor)
-        resultado = [r for r in resultado if _normalizar(str(r.get(LEITOS_COL_SETOR, ""))) == se]
+    if status_ocupacao:
+        st = _normalizar(status_ocupacao)
+        resultado = [r for r in resultado if _normalizar(str(r.get(LEITOS_COL_STATUS_OCUPACAO, ""))) == st]
+    if status_limpeza:
+        sl = _normalizar(status_limpeza)
+        resultado = [r for r in resultado if _normalizar(str(r.get(LEITOS_COL_STATUS_LIMPEZA, ""))) == sl]
 
     return resultado
 
 
 def _formatar_leito_markdown(r: dict[str, Any]) -> str:
     """Formata um registro de leito como Markdown."""
-    status = str(r.get(LEITOS_COL_STATUS, "N/A"))
-    emoji = {"disponivel": "🟢", "ocupado": "🔴", "limpeza": "🟡", "manutencao": "🔧", "reservado": "🔵"}.get(
-        _normalizar(status), "⚪"
+    status_ocup = str(r.get(LEITOS_COL_STATUS_OCUPACAO, "N/A"))
+    emoji = {
+        "disponivel": "🟢", "ocupado": "🔴", "reservado": "🔵",
+    }.get(_normalizar(status_ocup), "⚪")
+
+    status_limp = str(r.get(LEITOS_COL_STATUS_LIMPEZA, ""))
+    emoji_limp = {"concluido": "✅", "pendente": "⚠️", "em andamento": "🔄"}.get(
+        _normalizar(status_limp), ""
     )
+
     linhas = [
-        f"### {emoji} Leito `{r.get(LEITOS_COL_LEITO, 'N/A')}` — {status}",
+        f"### {emoji} `{r.get(LEITOS_COL_LEITO, 'N/A')}` — {r.get(LEITOS_COL_QUARTO, 'N/A')}",
         f"- **Tipo de Quarto**: {r.get(LEITOS_COL_TIPO_QUARTO, 'N/A')}",
-        f"- **Setor**: {r.get(LEITOS_COL_SETOR, 'N/A')}",
+        f"- **Ocupação**: {status_ocup}",
+        f"- **Limpeza**: {emoji_limp} {status_limp}" if status_limp else "- **Limpeza**: N/A",
     ]
+    if r.get(LEITOS_COL_ULTIMA_LIMPEZA):
+        linhas.append(f"- **Última Limpeza**: {r[LEITOS_COL_ULTIMA_LIMPEZA]}")
     if r.get(LEITOS_COL_PACIENTE):
         linhas.append(f"- **Paciente**: {r[LEITOS_COL_PACIENTE]}")
     if r.get(LEITOS_COL_MEDICO):
@@ -287,6 +317,11 @@ def _formatar_leito_markdown(r: dict[str, Any]) -> str:
     if r.get(LEITOS_COL_OBSERVACOES):
         linhas.append(f"- **Observações**: {r[LEITOS_COL_OBSERVACOES]}")
     return "\n".join(linhas)
+
+
+# ---------------------------------------------------------------------------
+# Utilitários — Notificações
+# ---------------------------------------------------------------------------
 
 
 def _enviar_email_gmail(destinatario: str, assunto: str, mensagem: str) -> None:
@@ -306,8 +341,25 @@ def _enviar_email_gmail(destinatario: str, assunto: str, mensagem: str) -> None:
         servidor.sendmail(GMAIL_USER, destinatario, msg.as_string())
 
 
+async def _enviar_sms_twilio(destinatario: str, mensagem: str) -> None:
+    """Envia SMS via Twilio REST API usando httpx (sem SDK Twilio)."""
+    if not TWILIO_ACCOUNT_SID or not TWILIO_AUTH_TOKEN or not TWILIO_FROM_NUMBER:
+        raise EnvironmentError(
+            "Configure TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN e TWILIO_FROM_NUMBER no .env."
+        )
+    url = f"https://api.twilio.com/2010-04-01/Accounts/{TWILIO_ACCOUNT_SID}/Messages.json"
+    async with httpx.AsyncClient() as client:
+        response = await client.post(
+            url,
+            auth=(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN),
+            data={"From": TWILIO_FROM_NUMBER, "To": destinatario, "Body": mensagem},
+            timeout=30.0,
+        )
+        response.raise_for_status()
+
+
 # ---------------------------------------------------------------------------
-# Enums e modelos de entrada — AutoPeças
+# Enums e modelos de entrada — compartilhados
 # ---------------------------------------------------------------------------
 
 
@@ -315,6 +367,11 @@ class FormatoResposta(str, Enum):
     """Formato de saída das ferramentas."""
     MARKDOWN = "markdown"
     JSON = "json"
+
+
+# ---------------------------------------------------------------------------
+# Modelos de entrada — AutoPeças
+# ---------------------------------------------------------------------------
 
 
 class BuscarPecaInput(BaseModel):
@@ -395,15 +452,51 @@ class ListarLeitosInput(BaseModel):
         description="Filtrar por tipo de quarto (ex: 'Enfermaria', 'UTI', 'Apartamento', 'Semi-Intensivo')",
         max_length=100,
     )
-    status: Optional[str] = Field(
+    status_ocupacao: Optional[str] = Field(
         default=None,
-        description="Filtrar por status do leito (ex: 'Disponível', 'Ocupado', 'Limpeza', 'Manutenção', 'Reservado')",
+        description="Filtrar por Status_Ocupacao (ex: 'Disponível', 'Ocupado', 'Reservado')",
         max_length=50,
     )
-    setor: Optional[str] = Field(
+    status_limpeza: Optional[str] = Field(
         default=None,
-        description="Filtrar por setor/ala hospitalar (ex: 'Cardiologia', 'Ortopedia')",
-        max_length=100,
+        description="Filtrar por Status_Limpeza (ex: 'Concluído', 'Pendente', 'Em Andamento')",
+        max_length=50,
+    )
+    limit: int = Field(default=20, description="Máximo de resultados por página (1–100)", ge=1, le=100)
+    offset: int = Field(default=0, description="Deslocamento para paginação", ge=0)
+    formato: FormatoResposta = Field(default=FormatoResposta.MARKDOWN, description="'markdown' ou 'json'")
+
+
+class ListarEnfermariaInput(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True, validate_assignment=True, extra="forbid")
+
+    status_ocupacao: Optional[str] = Field(
+        default=None,
+        description="Filtrar por Status_Ocupacao (ex: 'Disponível', 'Ocupado')",
+        max_length=50,
+    )
+    status_limpeza: Optional[str] = Field(
+        default=None,
+        description="Filtrar por Status_Limpeza (ex: 'Concluído', 'Pendente')",
+        max_length=50,
+    )
+    limit: int = Field(default=20, description="Máximo de resultados por página (1–100)", ge=1, le=100)
+    offset: int = Field(default=0, description="Deslocamento para paginação", ge=0)
+    formato: FormatoResposta = Field(default=FormatoResposta.MARKDOWN, description="'markdown' ou 'json'")
+
+
+class ListarUTIInput(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True, validate_assignment=True, extra="forbid")
+
+    status_ocupacao: Optional[str] = Field(
+        default=None,
+        description="Filtrar por Status_Ocupacao (ex: 'Disponível', 'Ocupado')",
+        max_length=50,
+    )
+    status_limpeza: Optional[str] = Field(
+        default=None,
+        description="Filtrar por Status_Limpeza (ex: 'Concluído', 'Pendente')",
+        max_length=50,
     )
     limit: int = Field(default=20, description="Máximo de resultados por página (1–100)", ge=1, le=100)
     offset: int = Field(default=0, description="Deslocamento para paginação", ge=0)
@@ -415,7 +508,7 @@ class ObterDetalhesLeitoInput(BaseModel):
 
     leito_id: str = Field(
         ...,
-        description="Identificador do leito (ex: 'A-101', 'UTI-05')",
+        description="Identificador do leito — campo ID_Leito (ex: 'A-101', 'UTI-05')",
         min_length=1,
         max_length=50,
     )
@@ -427,12 +520,7 @@ class VerificarDisponibilidadeInput(BaseModel):
 
     tipo_quarto: Optional[str] = Field(
         default=None,
-        description="Filtrar disponibilidade por tipo de quarto (ex: 'UTI', 'Enfermaria')",
-        max_length=100,
-    )
-    setor: Optional[str] = Field(
-        default=None,
-        description="Filtrar disponibilidade por setor/ala",
+        description="Filtrar disponibilidade por tipo de quarto (ex: 'UTI', 'Enfermaria', 'Apartamento')",
         max_length=100,
     )
     formato: FormatoResposta = Field(default=FormatoResposta.MARKDOWN, description="'markdown' ou 'json'")
@@ -441,53 +529,40 @@ class VerificarDisponibilidadeInput(BaseModel):
 class ResumoOcupacaoInput(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True, validate_assignment=True, extra="forbid")
 
-    setor: Optional[str] = Field(
+    tipo_quarto: Optional[str] = Field(
         default=None,
-        description="Filtrar resumo por setor/ala hospitalar",
+        description="Filtrar resumo por tipo de quarto",
         max_length=100,
     )
     formato: FormatoResposta = Field(default=FormatoResposta.MARKDOWN, description="'markdown' ou 'json'")
 
 
-class ListarEnfermariaInput(BaseModel):
+class AtualizarStatusLimpezaInput(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True, validate_assignment=True, extra="forbid")
 
-    status: Optional[str] = Field(
-        default=None,
-        description="Filtrar leitos de enfermaria por status (ex: 'Disponível', 'Ocupado', 'Limpeza')",
+    leito_id: str = Field(
+        ...,
+        description="ID do leito a atualizar — campo ID_Leito (ex: 'A-101', 'UTI-05')",
+        min_length=1,
         max_length=50,
     )
-    setor: Optional[str] = Field(
-        default=None,
-        description="Filtrar leitos de enfermaria por setor",
-        max_length=100,
+    status_limpeza: str = Field(
+        ...,
+        description="Novo valor para Status_Limpeza (ex: 'Concluído', 'Pendente', 'Em Andamento')",
+        min_length=1,
+        max_length=50,
     )
-    limit: int = Field(default=20, description="Máximo de resultados por página (1–100)", ge=1, le=100)
-    offset: int = Field(default=0, description="Deslocamento para paginação", ge=0)
-    formato: FormatoResposta = Field(default=FormatoResposta.MARKDOWN, description="'markdown' ou 'json'")
 
 
 class EnviarNotificacaoInput(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True, validate_assignment=True, extra="forbid")
 
     destinatario: str = Field(
-        ...,
-        description="E-mail do destinatário (ex: 'enfermeira@hospital.com.br')",
-        min_length=5,
-        max_length=200,
+        ..., description="E-mail do destinatário (ex: 'enfermeira@hospital.com.br')",
+        min_length=5, max_length=200,
     )
-    assunto: str = Field(
-        ...,
-        description="Assunto do e-mail (ex: 'Leito A-101 disponível para internação')",
-        min_length=1,
-        max_length=200,
-    )
-    mensagem: str = Field(
-        ...,
-        description="Corpo da mensagem de texto simples",
-        min_length=1,
-        max_length=5000,
-    )
+    assunto: str = Field(..., description="Assunto do e-mail", min_length=1, max_length=200)
+    mensagem: str = Field(..., description="Corpo da mensagem em texto simples", min_length=1, max_length=5000)
 
     @field_validator("destinatario")
     @classmethod
@@ -495,6 +570,30 @@ class EnviarNotificacaoInput(BaseModel):
         if "@" not in v or "." not in v.split("@")[-1]:
             raise ValueError("E-mail do destinatário inválido.")
         return v.lower()
+
+
+class EnviarSMSInput(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True, validate_assignment=True, extra="forbid")
+
+    destinatario: str = Field(
+        ...,
+        description="Número de telefone do destinatário no formato E.164 (ex: '+5511952767064')",
+        min_length=8,
+        max_length=20,
+    )
+    mensagem: str = Field(
+        ...,
+        description="Texto do SMS (máximo 160 caracteres para SMS simples)",
+        min_length=1,
+        max_length=1600,
+    )
+
+    @field_validator("destinatario")
+    @classmethod
+    def numero_valido(cls, v: str) -> str:
+        if not v.startswith("+"):
+            raise ValueError("Número deve estar no formato E.164, começando com '+' (ex: '+5511999999999').")
+        return v
 
 
 # ---------------------------------------------------------------------------
@@ -506,8 +605,9 @@ mcp = FastMCP(
     instructions=(
         "Você é um assistente integrado com duas bases de dados via Google Sheets:\n"
         "1. AutoPeças (AutoMax): consulte peças, estoque, categorias e marcas.\n"
-        "2. Leitos Hospitalares: gerencie leitos, verifique disponibilidade, "
-        "consulte ocupação por tipo de quarto e envie notificações por e-mail."
+        "2. Leitos Hospitalares: gerencie leitos por tipo (Enfermaria, UTI, Apartamento), "
+        "verifique disponibilidade, acompanhe status de ocupação e limpeza, "
+        "atualize Status_Limpeza e envie notificações por e-mail ou SMS."
     ),
 )
 
@@ -523,9 +623,6 @@ mcp = FastMCP(
 )
 async def autopecas_buscar_peca(params: BuscarPecaInput) -> str:
     """Busca peças na base AutoPeças por texto livre (nome, código ou descrição).
-
-    Busca case-insensitive e sem distinção de acentos nos campos código, nome e descrição.
-    Suporta filtros adicionais por categoria, marca e disponibilidade de estoque.
 
     Args:
         params (BuscarPecaInput):
@@ -554,14 +651,11 @@ async def autopecas_buscar_peca(params: BuscarPecaInput) -> str:
             return f"Nenhuma peça encontrada para '{params.query}'."
 
         pagina = _paginar(filtrados, params.limit, params.offset)
-
         if params.formato == FormatoResposta.JSON:
             return json.dumps(pagina, ensure_ascii=False, indent=2)
 
-        linhas = [
-            f"# Resultados para '{params.query}'",
-            f"Encontradas **{pagina['total']}** peças (exibindo {pagina['count']})", "",
-        ]
+        linhas = [f"# Resultados para '{params.query}'",
+                  f"Encontradas **{pagina['total']}** peças (exibindo {pagina['count']})", ""]
         for r in pagina["items"]:
             linhas += [_formatar_peca_markdown(r), ""]
         if pagina["has_more"]:
@@ -569,7 +663,7 @@ async def autopecas_buscar_peca(params: BuscarPecaInput) -> str:
         return "\n".join(linhas)
 
     except Exception as e:
-        return _handle_error(e, SHEET_NAME)
+        return _handle_error(e, AUTOPECAS_SHEET_NAME)
 
 
 @mcp.tool(
@@ -589,9 +683,6 @@ async def autopecas_listar_pecas(params: ListarPecasInput) -> str:
             - offset (int): Paginação (padrão: 0)
             - formato (str): 'markdown' ou 'json'
 
-    Returns:
-        str: Lista paginada de peças com metadados (total, has_more, next_offset).
-
     Exemplos:
         - "Listar peças de Freios" → categoria="Freios"
         - "Peças Bosch em estoque" → marca="Bosch", apenas_em_estoque=True
@@ -606,7 +697,6 @@ async def autopecas_listar_pecas(params: ListarPecasInput) -> str:
             return "Nenhuma peça encontrada com os filtros aplicados."
 
         pagina = _paginar(filtrados, params.limit, params.offset)
-
         if params.formato == FormatoResposta.JSON:
             return json.dumps(pagina, ensure_ascii=False, indent=2)
 
@@ -624,7 +714,7 @@ async def autopecas_listar_pecas(params: ListarPecasInput) -> str:
         return "\n".join(linhas)
 
     except Exception as e:
-        return _handle_error(e, SHEET_NAME)
+        return _handle_error(e, AUTOPECAS_SHEET_NAME)
 
 
 @mcp.tool(
@@ -640,9 +730,6 @@ async def autopecas_obter_detalhes(params: ObterDetalhesPecaInput) -> str:
             - codigo (str): Código único da peça (ex: 'F-1023')
             - formato (str): 'markdown' ou 'json'
 
-    Returns:
-        str: Dados completos da peça (preço, estoque, fornecedor, localização, descrição).
-
     Exemplos:
         - "Detalhes de F-1023" → codigo="F-1023"
     """
@@ -653,16 +740,14 @@ async def autopecas_obter_detalhes(params: ObterDetalhesPecaInput) -> str:
             (r for r in registros if _normalizar(str(r.get(COL_CODIGO, ""))) == codigo_norm), None
         )
         if not encontrado:
-            return (
-                f"Peça '{params.codigo}' não encontrada. "
-                "Use `autopecas_buscar_peca` para localizar pelo nome ou descrição."
-            )
+            return (f"Peça '{params.codigo}' não encontrada. "
+                    "Use `autopecas_buscar_peca` para localizar pelo nome ou descrição.")
         if params.formato == FormatoResposta.JSON:
             return json.dumps(encontrado, ensure_ascii=False, indent=2)
         return f"# Detalhes da Peça\n\n{_formatar_peca_markdown(encontrado)}"
 
     except Exception as e:
-        return _handle_error(e, SHEET_NAME)
+        return _handle_error(e, AUTOPECAS_SHEET_NAME)
 
 
 @mcp.tool(
@@ -676,9 +761,6 @@ async def autopecas_listar_categorias(params: ListarCategoriasInput) -> str:
     Args:
         params (ListarCategoriasInput):
             - formato (str): 'markdown' ou 'json'
-
-    Returns:
-        str: Tabela de categorias com total de peças e quantidade em estoque.
     """
     try:
         registros = _get_all_records()
@@ -704,7 +786,7 @@ async def autopecas_listar_categorias(params: ListarCategoriasInput) -> str:
         return "\n".join(linhas)
 
     except Exception as e:
-        return _handle_error(e, SHEET_NAME)
+        return _handle_error(e, AUTOPECAS_SHEET_NAME)
 
 
 @mcp.tool(
@@ -715,7 +797,7 @@ async def autopecas_listar_categorias(params: ListarCategoriasInput) -> str:
 async def autopecas_verificar_estoque(params: VerificarEstoqueInput) -> str:
     """Verifica estoque de peças específicas ou exibe resumo geral por categoria.
 
-    Se `codigos` for informado, retorna estoque de cada peça listada (com alertas).
+    Se `codigos` for informado, retorna estoque de cada peça (com alertas ⚠️).
     Se omitido, retorna resumo agrupado por categoria.
 
     Args:
@@ -723,9 +805,6 @@ async def autopecas_verificar_estoque(params: VerificarEstoqueInput) -> str:
             - codigos (Optional[List[str]]): Códigos das peças a verificar
             - categoria (Optional[str]): Filtrar resumo por categoria
             - formato (str): 'markdown' ou 'json'
-
-    Returns:
-        str: Estoque por peça (com alertas ⚠️) ou resumo por categoria.
 
     Exemplos:
         - "Estoque de F-1023 e BP-0042" → codigos=["F-1023", "BP-0042"]
@@ -742,9 +821,8 @@ async def autopecas_verificar_estoque(params: VerificarEstoqueInput) -> str:
                 (resultados if r else nao_encontrados).append(r if r else cod)
 
             if params.formato == FormatoResposta.JSON:
-                return json.dumps(
-                    {"pecas": resultados, "nao_encontrados": nao_encontrados}, ensure_ascii=False, indent=2
-                )
+                return json.dumps({"pecas": resultados, "nao_encontrados": nao_encontrados},
+                                  ensure_ascii=False, indent=2)
 
             linhas = ["# Verificação de Estoque\n"]
             for r in resultados:
@@ -783,11 +861,12 @@ async def autopecas_verificar_estoque(params: VerificarEstoqueInput) -> str:
                   "| Categoria | Peças | Qtd. Total | Sem Estoque | Estoque Baixo |",
                   "|-----------|-------|-----------|-------------|---------------|"]
         for cat, info in sorted(resumo.items()):
-            linhas.append(f"| {cat} | {info['total']} | {info['qtd_total']} | {info['sem_estoque']} | {info['estoque_baixo']} |")
+            linhas.append(f"| {cat} | {info['total']} | {info['qtd_total']} "
+                          f"| {info['sem_estoque']} | {info['estoque_baixo']} |")
         return "\n".join(linhas)
 
     except Exception as e:
-        return _handle_error(e, SHEET_NAME)
+        return _handle_error(e, AUTOPECAS_SHEET_NAME)
 
 
 @mcp.tool(
@@ -802,9 +881,6 @@ async def autopecas_listar_marcas(params: ListarMarcasInput) -> str:
         params (ListarMarcasInput):
             - categoria (Optional[str]): Filtrar por categoria
             - formato (str): 'markdown' ou 'json'
-
-    Returns:
-        str: Lista de marcas ordenadas por quantidade de peças.
 
     Exemplos:
         - "Marcas de freios" → categoria="Freios"
@@ -831,7 +907,7 @@ async def autopecas_listar_marcas(params: ListarMarcasInput) -> str:
         return "\n".join(linhas)
 
     except Exception as e:
-        return _handle_error(e, SHEET_NAME)
+        return _handle_error(e, AUTOPECAS_SHEET_NAME)
 
 
 # ===========================================================================
@@ -845,45 +921,45 @@ async def autopecas_listar_marcas(params: ListarMarcasInput) -> str:
                  "readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False},
 )
 async def leitos_listar_leitos(params: ListarLeitosInput) -> str:
-    """Lista todos os leitos hospitalares com suporte a paginação e filtros combinados.
+    """Lista todos os leitos hospitalares com paginação e filtros combinados.
 
-    Acesso equivalente ao Agent Diretoria do N8N: visão completa de todos os leitos,
-    sem restrição de tipo de quarto. Filtrável por tipo, status e setor.
+    Visão completa equivalente ao Agent Diretoria do N8N — sem restrição de tipo
+    de quarto. Filtrável por tipo, Status_Ocupacao e Status_Limpeza.
+
+    Colunas da planilha: ID_Leito, Quarto, Tipo_Quarto, Status_Ocupacao,
+    Status_Limpeza, Paciente, Ultima_Limpeza.
 
     Args:
         params (ListarLeitosInput):
             - tipo_quarto (Optional[str]): 'Enfermaria', 'UTI', 'Apartamento', 'Semi-Intensivo'
-            - status (Optional[str]): 'Disponível', 'Ocupado', 'Limpeza', 'Manutenção', 'Reservado'
-            - setor (Optional[str]): Setor/ala hospitalar (ex: 'Cardiologia')
+            - status_ocupacao (Optional[str]): 'Disponível', 'Ocupado', 'Reservado'
+            - status_limpeza (Optional[str]): 'Concluído', 'Pendente', 'Em Andamento'
             - limit (int): Máximo de resultados (padrão: 20)
             - offset (int): Paginação (padrão: 0)
             - formato (str): 'markdown' ou 'json'
 
-    Returns:
-        str: Lista paginada de leitos com status, tipo, setor e paciente atual.
-
     Exemplos:
         - "Todos os leitos de UTI" → tipo_quarto="UTI"
-        - "Leitos em limpeza" → status="Limpeza"
-        - "Leitos da Cardiologia" → setor="Cardiologia"
+        - "Leitos com limpeza pendente" → status_limpeza="Pendente"
+        - "Leitos disponíveis" → status_ocupacao="Disponível"
     """
     try:
         registros = _get_leitos_records()
         filtrados = _filtrar_leitos(registros, tipo_quarto=params.tipo_quarto,
-                                    status=params.status, setor=params.setor)
+                                    status_ocupacao=params.status_ocupacao,
+                                    status_limpeza=params.status_limpeza)
         if not filtrados:
             return "Nenhum leito encontrado com os filtros aplicados."
 
         pagina = _paginar(filtrados, params.limit, params.offset)
-
         if params.formato == FormatoResposta.JSON:
             return json.dumps(pagina, ensure_ascii=False, indent=2)
 
         titulo = "# Leitos Hospitalares"
         if params.tipo_quarto:
             titulo += f" — {params.tipo_quarto}"
-        if params.status:
-            titulo += f" | {params.status}"
+        if params.status_ocupacao:
+            titulo += f" | {params.status_ocupacao}"
 
         linhas = [titulo, f"Total: **{pagina['total']}** leitos (exibindo {pagina['count']})", ""]
         for r in pagina["items"]:
@@ -902,46 +978,114 @@ async def leitos_listar_leitos(params: ListarLeitosInput) -> str:
                  "readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False},
 )
 async def leitos_listar_enfermaria(params: ListarEnfermariaInput) -> str:
-    """Lista apenas os leitos do tipo Enfermaria, com filtros opcionais de status e setor.
+    """Lista apenas os leitos do tipo Enfermaria (Tipo_Quarto = 'Enfermaria').
 
-    Equivale ao Agent Enfermaria do N8N, que acessa a planilha com filtro fixo
-    `Tipo_Quarto = 'Enfermaria'`. Ideal para o corpo de enfermagem gerenciar
-    disponibilidade e limpeza de leitos de enfermaria.
+    Equivale ao Agent Enfermaria do N8N. Suporta os três relatórios do menu:
+    - Leitos Disponíveis e Ocupados → status_ocupacao="Disponível" ou "Ocupado"
+    - Ocupação de Leitos → (sem filtro, ver leitos_resumo_ocupacao)
+    - Status de Limpeza → status_limpeza="Pendente" ou "Concluído"
 
     Args:
         params (ListarEnfermariaInput):
-            - status (Optional[str]): 'Disponível', 'Ocupado', 'Limpeza', 'Manutenção'
-            - setor (Optional[str]): Setor/ala hospitalar
+            - status_ocupacao (Optional[str]): 'Disponível', 'Ocupado', 'Reservado'
+            - status_limpeza (Optional[str]): 'Concluído', 'Pendente', 'Em Andamento'
             - limit (int): Máximo de resultados (padrão: 20)
             - offset (int): Paginação (padrão: 0)
             - formato (str): 'markdown' ou 'json'
 
-    Returns:
-        str: Lista paginada de leitos de enfermaria.
-
     Exemplos:
-        - "Leitos de enfermaria disponíveis" → status="Disponível"
-        - "Enfermaria em limpeza" → status="Limpeza"
-        - "Enfermaria da Ortopedia" → setor="Ortopedia"
+        - "Leitos de enfermaria disponíveis" → status_ocupacao="Disponível"
+        - "Limpeza pendente na enfermaria" → status_limpeza="Pendente"
     """
     try:
         registros = _get_leitos_records()
-        # Filtro fixo: apenas Enfermaria (equivalente ao Agent Enfermaria do N8N)
         filtrados = _filtrar_leitos(registros, tipo_quarto="Enfermaria",
-                                    status=params.status, setor=params.setor)
+                                    status_ocupacao=params.status_ocupacao,
+                                    status_limpeza=params.status_limpeza)
         if not filtrados:
             return "Nenhum leito de enfermaria encontrado com os filtros aplicados."
 
         pagina = _paginar(filtrados, params.limit, params.offset)
-
         if params.formato == FormatoResposta.JSON:
             return json.dumps(pagina, ensure_ascii=False, indent=2)
 
         titulo = "# Leitos — Enfermaria"
-        if params.status:
-            titulo += f" | {params.status}"
+        if params.status_ocupacao:
+            titulo += f" | {params.status_ocupacao}"
+        if params.status_limpeza:
+            titulo += f" | Limpeza: {params.status_limpeza}"
 
         linhas = [titulo, f"Total: **{pagina['total']}** leitos (exibindo {pagina['count']})", ""]
+        for r in pagina["items"]:
+            linhas += [_formatar_leito_markdown(r), ""]
+        if pagina["has_more"]:
+            linhas.append(f"_Use `offset={pagina['next_offset']}` para ver mais resultados._")
+        return "\n".join(linhas)
+
+    except Exception as e:
+        return _handle_error(e, LEITOS_SHEET_NAME)
+
+
+@mcp.tool(
+    name="leitos_listar_uti",
+    annotations={"title": "Listar Leitos de UTI",
+                 "readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False},
+)
+async def leitos_listar_uti(params: ListarUTIInput) -> str:
+    """Lista apenas os leitos do tipo UTI (Tipo_Quarto = 'UTI').
+
+    Equivale ao Agent UTI do N8N. Suporta os dois relatórios do menu:
+    - Relatório de Dias Internados → exibe Data_Internacao de cada paciente
+    - Quantidade de Pacientes Internados → contagem de leitos Ocupados
+
+    Args:
+        params (ListarUTIInput):
+            - status_ocupacao (Optional[str]): 'Disponível', 'Ocupado', 'Reservado'
+            - status_limpeza (Optional[str]): 'Concluído', 'Pendente', 'Em Andamento'
+            - limit (int): Máximo de resultados (padrão: 20)
+            - offset (int): Paginação (padrão: 0)
+            - formato (str): 'markdown' ou 'json'
+
+    Exemplos:
+        - "Pacientes na UTI" → status_ocupacao="Ocupado"
+        - "Leitos de UTI disponíveis" → status_ocupacao="Disponível"
+        - "Dias de internação na UTI" → (sem filtros, ver Data_Internacao no resultado)
+    """
+    try:
+        registros = _get_leitos_records()
+        filtrados = _filtrar_leitos(registros, tipo_quarto="UTI",
+                                    status_ocupacao=params.status_ocupacao,
+                                    status_limpeza=params.status_limpeza)
+        if not filtrados:
+            return "Nenhum leito de UTI encontrado com os filtros aplicados."
+
+        pagina = _paginar(filtrados, params.limit, params.offset)
+
+        # Contagens para o cabeçalho do relatório
+        total_ocupados = sum(
+            1 for r in filtrados
+            if _normalizar(str(r.get(LEITOS_COL_STATUS_OCUPACAO, ""))) == "ocupado"
+        )
+        total_disponiveis = sum(
+            1 for r in filtrados
+            if _normalizar(str(r.get(LEITOS_COL_STATUS_OCUPACAO, ""))) == "disponivel"
+        )
+
+        if params.formato == FormatoResposta.JSON:
+            resultado = dict(pagina)
+            resultado["resumo"] = {"ocupados": total_ocupados, "disponiveis": total_disponiveis}
+            return json.dumps(resultado, ensure_ascii=False, indent=2)
+
+        titulo = "# Leitos — UTI"
+        if params.status_ocupacao:
+            titulo += f" | {params.status_ocupacao}"
+
+        linhas = [
+            titulo,
+            f"Total: **{pagina['total']}** leitos (exibindo {pagina['count']}) "
+            f"| 🔴 Ocupados: **{total_ocupados}** | 🟢 Disponíveis: **{total_disponiveis}**",
+            "",
+        ]
         for r in pagina["items"]:
             linhas += [_formatar_leito_markdown(r), ""]
         if pagina["has_more"]:
@@ -958,39 +1102,30 @@ async def leitos_listar_enfermaria(params: ListarEnfermariaInput) -> str:
                  "readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False},
 )
 async def leitos_verificar_disponibilidade(params: VerificarDisponibilidadeInput) -> str:
-    """Exibe leitos com status 'Disponível', filtrável por tipo de quarto e setor.
+    """Exibe leitos com Status_Ocupacao = 'Disponível', com resumo por tipo de quarto.
 
     Ferramenta central para admissão de pacientes: identifica quais leitos estão
-    livres para ocupação imediata, com resumo por tipo de quarto.
+    livres para ocupação imediata.
 
     Args:
         params (VerificarDisponibilidadeInput):
-            - tipo_quarto (Optional[str]): Filtrar por tipo (ex: 'UTI', 'Apartamento')
-            - setor (Optional[str]): Filtrar por setor/ala
+            - tipo_quarto (Optional[str]): Filtrar por tipo (ex: 'UTI', 'Enfermaria')
             - formato (str): 'markdown' ou 'json'
-
-    Returns:
-        str: Leitos disponíveis com resumo por tipo de quarto e contagem total.
 
     Exemplos:
         - "Leitos de UTI disponíveis" → tipo_quarto="UTI"
-        - "Leitos disponíveis na Cardiologia" → setor="Cardiologia"
         - "Quantos leitos livres temos?" → (sem parâmetros)
     """
     try:
         registros = _get_leitos_records()
         disponiveis = _filtrar_leitos(registros, tipo_quarto=params.tipo_quarto,
-                                      status="Disponível", setor=params.setor)
-
+                                      status_ocupacao="Disponível")
         if not disponiveis:
             msg = "Nenhum leito disponível"
             if params.tipo_quarto:
                 msg += f" do tipo '{params.tipo_quarto}'"
-            if params.setor:
-                msg += f" no setor '{params.setor}'"
             return msg + " no momento."
 
-        # Agrupa por tipo de quarto para o resumo
         por_tipo: dict[str, list] = {}
         for r in disponiveis:
             tq = str(r.get(LEITOS_COL_TIPO_QUARTO, "N/A"))
@@ -1012,9 +1147,7 @@ async def leitos_verificar_disponibilidade(params: VerificarDisponibilidadeInput
         for tq, leitos in sorted(por_tipo.items()):
             linhas.append(f"## {tq} ({len(leitos)})")
             for r in leitos:
-                leito_id = r.get(LEITOS_COL_LEITO, "N/A")
-                setor = r.get(LEITOS_COL_SETOR, "N/A")
-                linhas.append(f"- `{leito_id}` — {setor}")
+                linhas.append(f"- `{r.get(LEITOS_COL_LEITO, 'N/A')}` — {r.get(LEITOS_COL_QUARTO, 'N/A')}")
             linhas.append("")
         return "\n".join(linhas)
 
@@ -1028,15 +1161,12 @@ async def leitos_verificar_disponibilidade(params: VerificarDisponibilidadeInput
                  "readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False},
 )
 async def leitos_obter_detalhes_leito(params: ObterDetalhesLeitoInput) -> str:
-    """Retorna todos os dados de um leito específico pelo seu identificador.
+    """Retorna todos os dados de um leito específico pelo campo ID_Leito.
 
     Args:
         params (ObterDetalhesLeitoInput):
-            - leito_id (str): Identificador do leito (ex: 'A-101', 'UTI-05')
+            - leito_id (str): Valor do campo ID_Leito (ex: 'A-101', 'UTI-05')
             - formato (str): 'markdown' ou 'json'
-
-    Returns:
-        str: Dados completos do leito: tipo, status, paciente, médico, datas e observações.
 
     Exemplos:
         - "Detalhes do leito A-101" → leito_id="A-101"
@@ -1049,10 +1179,8 @@ async def leitos_obter_detalhes_leito(params: ObterDetalhesLeitoInput) -> str:
             (r for r in registros if _normalizar(str(r.get(LEITOS_COL_LEITO, ""))) == leito_norm), None
         )
         if not encontrado:
-            return (
-                f"Leito '{params.leito_id}' não encontrado. "
-                "Use `leitos_listar_leitos` para ver os identificadores disponíveis."
-            )
+            return (f"Leito '{params.leito_id}' não encontrado. "
+                    "Use `leitos_listar_leitos` para ver os IDs disponíveis.")
         if params.formato == FormatoResposta.JSON:
             return json.dumps(encontrado, ensure_ascii=False, indent=2)
         return f"# Detalhes do Leito\n\n{_formatar_leito_markdown(encontrado)}"
@@ -1063,71 +1191,157 @@ async def leitos_obter_detalhes_leito(params: ObterDetalhesLeitoInput) -> str:
 
 @mcp.tool(
     name="leitos_resumo_ocupacao",
-    annotations={"title": "Resumo de Ocupação Hospitalar",
+    annotations={"title": "Resumo de Ocupação e Limpeza Hospitalar",
                  "readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False},
 )
 async def leitos_resumo_ocupacao(params: ResumoOcupacaoInput) -> str:
-    """Exibe dashboard de ocupação hospitalar agrupado por tipo de quarto e status.
+    """Dashboard de ocupação e limpeza agrupado por Tipo_Quarto.
 
-    Equivale à visão de gestão do Agent Diretoria: panorama completo da ocupação
-    com totais por categoria de status (Disponível, Ocupado, Limpeza, Manutenção).
+    Exibe dois painéis:
+    1. Ocupação: contagens de Status_Ocupacao (Disponível, Ocupado, Reservado)
+    2. Limpeza: contagens de Status_Limpeza (Concluído, Pendente, Em Andamento)
+
+    Equivale à visão do Agent Diretoria e suporta os relatórios de Ocupação e
+    Status de Limpeza do Agent Enfermaria.
 
     Args:
         params (ResumoOcupacaoInput):
-            - setor (Optional[str]): Filtrar resumo por setor/ala
+            - tipo_quarto (Optional[str]): Filtrar por tipo de quarto
             - formato (str): 'markdown' ou 'json'
 
-    Returns:
-        str: Tabela de ocupação por tipo de quarto com contagens por status e taxa de ocupação.
-
     Exemplos:
-        - "Dashboard de ocupação" → (sem parâmetros)
-        - "Ocupação da UTI" → setor="UTI" (ou use leitos_listar_leitos com tipo_quarto)
+        - "Dashboard geral" → (sem parâmetros)
+        - "Resumo da enfermaria" → tipo_quarto="Enfermaria"
     """
     try:
         registros = _get_leitos_records()
-        filtrados = _filtrar_leitos(registros, setor=params.setor)
-
-        # Agrupamento por tipo_quarto → contagem por status
-        resumo: dict[str, dict[str, int]] = {}
-        for r in filtrados:
-            tq = str(r.get(LEITOS_COL_TIPO_QUARTO, "N/A")).strip() or "N/A"
-            st = str(r.get(LEITOS_COL_STATUS, "N/A")).strip() or "N/A"
-            if tq not in resumo:
-                resumo[tq] = {"Total": 0, "Disponível": 0, "Ocupado": 0,
-                               "Limpeza": 0, "Manutenção": 0, "Reservado": 0, "Outros": 0}
-            resumo[tq]["Total"] += 1
-            chave = st if st in resumo[tq] else "Outros"
-            resumo[tq][chave] += 1
-
-        if not resumo:
+        filtrados = _filtrar_leitos(registros, tipo_quarto=params.tipo_quarto)
+        if not filtrados:
             return "Nenhum dado de leitos encontrado."
 
+        ocupacao: dict[str, dict[str, int]] = {}
+        limpeza: dict[str, dict[str, int]] = {}
+
+        for r in filtrados:
+            tq = str(r.get(LEITOS_COL_TIPO_QUARTO, "N/A")).strip() or "N/A"
+            st_ocup = str(r.get(LEITOS_COL_STATUS_OCUPACAO, "N/A")).strip() or "N/A"
+            st_limp = str(r.get(LEITOS_COL_STATUS_LIMPEZA, "N/A")).strip() or "N/A"
+
+            if tq not in ocupacao:
+                ocupacao[tq] = {"Total": 0, "Disponível": 0, "Ocupado": 0, "Reservado": 0, "Outros": 0}
+            ocupacao[tq]["Total"] += 1
+            ocupacao[tq][st_ocup if st_ocup in ocupacao[tq] else "Outros"] += 1
+
+            if tq not in limpeza:
+                limpeza[tq] = {"Total": 0, "Concluído": 0, "Pendente": 0, "Em Andamento": 0, "Outros": 0}
+            limpeza[tq]["Total"] += 1
+            limpeza[tq][st_limp if st_limp in limpeza[tq] else "Outros"] += 1
+
         if params.formato == FormatoResposta.JSON:
-            return json.dumps({"resumo_por_tipo": resumo}, ensure_ascii=False, indent=2)
+            return json.dumps({"ocupacao_por_tipo": ocupacao, "limpeza_por_tipo": limpeza},
+                              ensure_ascii=False, indent=2)
 
-        total_geral = sum(v["Total"] for v in resumo.values())
-        total_ocupado = sum(v["Ocupado"] for v in resumo.values())
-        taxa_geral = round(total_ocupado / total_geral * 100, 1) if total_geral else 0
+        total_geral = sum(v["Total"] for v in ocupacao.values())
+        total_ocupado = sum(v["Ocupado"] for v in ocupacao.values())
+        taxa = round(total_ocupado / total_geral * 100, 1) if total_geral else 0
+        total_pendente = sum(v["Pendente"] for v in limpeza.values())
 
-        titulo = "# 🏥 Dashboard de Ocupação Hospitalar"
-        if params.setor:
-            titulo += f" — {params.setor}"
+        titulo = "# 🏥 Dashboard Hospitalar"
+        if params.tipo_quarto:
+            titulo += f" — {params.tipo_quarto}"
 
         linhas = [
             titulo,
-            f"**{total_ocupado}/{total_geral}** leitos ocupados — Taxa: **{taxa_geral}%**\n",
-            "| Tipo de Quarto | Total | Disponível | Ocupado | Limpeza | Manutenção | Reservado |",
-            "|----------------|-------|------------|---------|---------|------------|-----------|",
+            f"**{total_ocupado}/{total_geral}** leitos ocupados — Taxa: **{taxa}%** "
+            f"| ⚠️ Limpezas pendentes: **{total_pendente}**\n",
+            "## Ocupação por Tipo de Quarto",
+            "| Tipo de Quarto | Total | Disponível | Ocupado | Reservado |",
+            "|----------------|-------|------------|---------|-----------|",
         ]
-        for tq, info in sorted(resumo.items()):
-            taxa = round(info["Ocupado"] / info["Total"] * 100, 0) if info["Total"] else 0
-            linhas.append(
-                f"| {tq} ({taxa:.0f}%) | {info['Total']} | {info['Disponível']} | "
-                f"{info['Ocupado']} | {info['Limpeza']} | {info['Manutenção']} | {info['Reservado']} |"
-            )
+        for tq, info in sorted(ocupacao.items()):
+            taxa_tq = round(info["Ocupado"] / info["Total"] * 100, 0) if info["Total"] else 0
+            linhas.append(f"| {tq} ({taxa_tq:.0f}%) | {info['Total']} | {info['Disponível']} "
+                          f"| {info['Ocupado']} | {info['Reservado']} |")
+
+        linhas += [
+            "",
+            "## Status de Limpeza por Tipo de Quarto",
+            "| Tipo de Quarto | Total | Concluído | Pendente | Em Andamento |",
+            "|----------------|-------|-----------|----------|--------------|",
+        ]
+        for tq, info in sorted(limpeza.items()):
+            linhas.append(f"| {tq} | {info['Total']} | {info['Concluído']} "
+                          f"| {info['Pendente']} | {info['Em Andamento']} |")
+
         return "\n".join(linhas)
 
+    except Exception as e:
+        return _handle_error(e, LEITOS_SHEET_NAME)
+
+
+@mcp.tool(
+    name="leitos_atualizar_status_limpeza",
+    annotations={"title": "Atualizar Status de Limpeza de um Leito",
+                 "readOnlyHint": False, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False},
+)
+async def leitos_atualizar_status_limpeza(params: AtualizarStatusLimpezaInput) -> str:
+    """Atualiza o campo Status_Limpeza de um leito na planilha Google Sheets.
+
+    Operação de ESCRITA — equivale ao nó 'Atualizar Base de Dados Hospital'
+    do N8N (mcp-all-nodes.json). Localiza o leito pelo ID_Leito e atualiza
+    apenas o campo Status_Limpeza.
+
+    Requer que a Service Account tenha permissão de EDITOR na planilha.
+
+    Args:
+        params (AtualizarStatusLimpezaInput):
+            - leito_id (str): ID do leito a atualizar (campo ID_Leito, ex: 'A-101')
+            - status_limpeza (str): Novo status (ex: 'Concluído', 'Pendente', 'Em Andamento')
+
+    Returns:
+        str: Confirmação da atualização ou mensagem de erro.
+
+    Exemplos:
+        - "Marcar limpeza do A-101 como concluída"
+          → leito_id="A-101", status_limpeza="Concluído"
+        - "Sinalizar UTI-05 com limpeza pendente"
+          → leito_id="UTI-05", status_limpeza="Pendente"
+    """
+    try:
+        sheet = _get_leitos_sheet()
+        headers = sheet.row_values(1)
+
+        try:
+            id_col_idx = headers.index(LEITOS_COL_LEITO) + 1
+            status_col_idx = headers.index(LEITOS_COL_STATUS_LIMPEZA) + 1
+        except ValueError as ve:
+            return (f"Coluna não encontrada na planilha: {ve}. "
+                    f"Verifique LEITOS_COL_LEITO='{LEITOS_COL_LEITO}' e "
+                    f"LEITOS_COL_STATUS_LIMPEZA='{LEITOS_COL_STATUS_LIMPEZA}' no .env.")
+
+        # Localiza o leito por ID_Leito para obter o número da linha
+        all_records = sheet.get_all_records()
+        row_number: Optional[int] = None
+        for i, record in enumerate(all_records):
+            if _normalizar(str(record.get(LEITOS_COL_LEITO, ""))) == _normalizar(params.leito_id):
+                row_number = i + 2  # linha 1 = cabeçalho; dados iniciam na linha 2
+                break
+
+        if row_number is None:
+            return (f"Leito '{params.leito_id}' não encontrado na planilha. "
+                    "Use `leitos_listar_leitos` para ver os IDs disponíveis.")
+
+        sheet.update_cell(row_number, status_col_idx, params.status_limpeza)
+        logger.info("Status_Limpeza do leito %s atualizado para '%s' (linha %d)",
+                    params.leito_id, params.status_limpeza, row_number)
+
+        return (f"✅ Status de limpeza atualizado com sucesso!\n"
+                f"- **Leito**: {params.leito_id}\n"
+                f"- **Novo Status_Limpeza**: {params.status_limpeza}")
+
+    except gspread.exceptions.APIError as e:
+        return (f"Erro na API do Google Sheets ao escrever: {e}. "
+                "Verifique se a Service Account tem permissão de EDITOR na planilha.")
     except Exception as e:
         return _handle_error(e, LEITOS_SHEET_NAME)
 
@@ -1138,14 +1352,13 @@ async def leitos_resumo_ocupacao(params: ResumoOcupacaoInput) -> str:
                  "readOnlyHint": False, "destructiveHint": False, "idempotentHint": False, "openWorldHint": True},
 )
 async def leitos_enviar_notificacao(params: EnviarNotificacaoInput) -> str:
-    """Envia uma notificação por e-mail via Gmail SMTP.
+    """Envia notificação por e-mail via Gmail SMTP.
 
-    Equivale à ferramenta 'Enviar' (gmailTool) do Agent Diretoria no N8N.
-    Usada para alertar equipes sobre mudanças de status de leitos, disponibilidade
-    para internação, solicitações de limpeza ou manutenção.
+    Equivale ao nó 'Enviar Email' (gmailTool) disponível para todos os agentes
+    (Diretoria, Enfermaria, UTI) em mcp-all-nodes.json.
 
-    Requer GMAIL_USER e GMAIL_APP_PASSWORD configurados no .env.
-    Para criar uma Senha de App: myaccount.google.com/apppasswords
+    Requer GMAIL_USER e GMAIL_APP_PASSWORD no .env.
+    Crie uma Senha de App em: myaccount.google.com/apppasswords
 
     Args:
         params (EnviarNotificacaoInput):
@@ -1153,33 +1366,68 @@ async def leitos_enviar_notificacao(params: EnviarNotificacaoInput) -> str:
             - assunto (str): Assunto do e-mail
             - mensagem (str): Corpo da mensagem (texto simples)
 
-    Returns:
-        str: Confirmação de envio ou mensagem de erro detalhada.
-
     Exemplos:
-        - "Avisar enfermagem que leito A-101 está disponível"
-          → destinatario="enfermagem@hospital.com.br",
+        - "Avisar que leito A-101 está disponível"
+          → destinatario="equipe@hospital.com.br",
             assunto="Leito A-101 disponível",
-            mensagem="O leito A-101 foi liberado e está pronto para novo paciente."
+            mensagem="O leito A-101 foi liberado e está pronto."
     """
     try:
         _enviar_email_gmail(params.destinatario, params.assunto, params.mensagem)
         logger.info("E-mail enviado para %s | assunto: %s", params.destinatario, params.assunto)
-        return (
-            f"✅ E-mail enviado com sucesso para **{params.destinatario}**\n"
-            f"- **Assunto**: {params.assunto}"
-        )
+        return (f"✅ E-mail enviado com sucesso!\n"
+                f"- **Para**: {params.destinatario}\n"
+                f"- **Assunto**: {params.assunto}")
     except EnvironmentError as e:
         return f"Erro de configuração: {e}"
     except smtplib.SMTPAuthenticationError:
-        return (
-            "Erro de autenticação SMTP. Verifique GMAIL_USER e GMAIL_APP_PASSWORD no .env. "
-            "Certifique-se de usar uma Senha de App (não a senha comum do Gmail)."
-        )
+        return ("Erro de autenticação SMTP. Verifique GMAIL_USER e GMAIL_APP_PASSWORD no .env. "
+                "Use uma Senha de App, não a senha comum do Gmail.")
     except smtplib.SMTPException as e:
         return f"Erro ao enviar e-mail via SMTP: {e}"
     except Exception as e:
         return f"Erro inesperado ao enviar e-mail ({type(e).__name__}): {e}"
+
+
+@mcp.tool(
+    name="leitos_enviar_sms",
+    annotations={"title": "Enviar SMS via Twilio",
+                 "readOnlyHint": False, "destructiveHint": False, "idempotentHint": False, "openWorldHint": True},
+)
+async def leitos_enviar_sms(params: EnviarSMSInput) -> str:
+    """Envia SMS via Twilio REST API.
+
+    Equivale ao nó 'Enviar SMS' (twilioTool) disponível para os agentes
+    Enfermaria e UTI em mcp-all-nodes.json.
+
+    Requer TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN e TWILIO_FROM_NUMBER no .env.
+
+    Args:
+        params (EnviarSMSInput):
+            - destinatario (str): Número no formato E.164 (ex: '+5511952767064')
+            - mensagem (str): Texto do SMS (até 160 chars para SMS simples)
+
+    Exemplos:
+        - "Avisar por SMS que UTI-05 foi liberada"
+          → destinatario="+5511999999999",
+            mensagem="Leito UTI-05 disponível para nova internação."
+    """
+    try:
+        await _enviar_sms_twilio(params.destinatario, params.mensagem)
+        logger.info("SMS enviado para %s", params.destinatario)
+        return (f"✅ SMS enviado com sucesso!\n"
+                f"- **Para**: {params.destinatario}\n"
+                f"- **Mensagem**: {params.mensagem[:80]}{'...' if len(params.mensagem) > 80 else ''}")
+    except EnvironmentError as e:
+        return f"Erro de configuração: {e}"
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code == 401:
+            return "Erro de autenticação Twilio. Verifique TWILIO_ACCOUNT_SID e TWILIO_AUTH_TOKEN no .env."
+        return f"Erro na API Twilio (HTTP {e.response.status_code}): {e.response.text}"
+    except httpx.TimeoutException:
+        return "Erro: timeout ao contactar a API Twilio. Tente novamente."
+    except Exception as e:
+        return f"Erro inesperado ao enviar SMS ({type(e).__name__}): {e}"
 
 
 # ---------------------------------------------------------------------------
