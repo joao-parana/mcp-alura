@@ -1,0 +1,145 @@
+
+{
+  "name": "MCP - AUTOPEÇAS",
+  "nodes": [
+    {
+      "parameters": {
+        "options": {
+          "systemMessage": "=Você é um Agente Corporativo AutoMax, conectado ao MCP Client.\n\nUtilize sempre as ferramentas disponíveis via MCP para executar suas ações.\n\n🎯 Instruções:\nSempre que o usuário solicitar informações, use as Tools do MCP Client para buscar dados ou executar ações em tempo real.\n\nUtilize a Base de Dados AutoPeças dentro do MCP"
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3,
+      "position": [
+        176,
+        0
+      ],
+      "id": "b6cecd08-b686-48db-b3c7-ea5662b0b1ba",
+      "name": "AI Agent"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "mode": "list",
+          "value": "gpt-4.1-mini"
+        },
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        96,
+        192
+      ],
+      "id": "3947ee0f-d90b-428a-9092-33a993a36407",
+      "name": "OpenAI Chat Model",
+      "credentials": {
+        "openAiApi": {
+          "id": "tkmRa1wnyrkvTMZr",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "contextWindowLength": 10
+      },
+      "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
+      "typeVersion": 1.3,
+      "position": [
+        256,
+        224
+      ],
+      "id": "7aab659c-5104-4bb1-8636-052bc119fb3b",
+      "name": "Simple Memory"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chatTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        -64,
+        0
+      ],
+      "id": "07007c99-ba42-4ad3-9030-e495f03f9442",
+      "name": "chat",
+      "webhookId": "f16ae545-6991-46f7-a811-3a5b163abe65"
+    },
+    {
+      "parameters": {
+        "endpointUrl": "https://n8ncursomcp.app.n8n.cloud/mcp/9d9fa204-dbcd-4fa4-aa4e-99cccdeaa556",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.mcpClientTool",
+      "typeVersion": 1.2,
+      "position": [
+        400,
+        208
+      ],
+      "id": "f0dfbc2c-bfce-48f6-aa14-c6bf63a5b8be",
+      "name": "MCP Client"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "OpenAI Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Simple Memory": {
+      "ai_memory": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "chat": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MCP Client": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "840f03a1-8b5a-4ece-8b91-959b536efd58",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "d0e4bbca388d0fff09d4f2fdd4f094bfdb736646443b5555ed601fc250f9ed17"
+  },
+  "id": "3cd27XEeFCbrHI70",
+  "tags": []
+}
+

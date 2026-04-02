@@ -1,0 +1,25 @@
+[project]
+name = "mcp-autopecas"
+version = "1.0.0"
+description = "MCP Server para Base de Dados AutoPeças via Google Sheets"
+requires-python = ">=3.12"
+dependencies = [
+    "mcp[cli]>=1.3.0",
+    "gspread>=6.0.0",
+    "google-auth>=2.27.0",
+    "python-dotenv>=1.0.0",
+    "pydantic>=2.6.0",
+]
+
+[project.scripts]
+mcp-autopecas = "server:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["."]
+
+[tool.hatch.metadata]
+allow-direct-references = true

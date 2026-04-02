@@ -1,0 +1,20 @@
+{
+  "_comentario": "Adicione o bloco 'autopecas' dentro de 'mcpServers' no seu claude_desktop_config.json",
+  "mcpServers": {
+    "autopecas": {
+      "command": "uv",
+      "args": [
+        "run",
+        "--project",
+        "/Users/joao/dev/code_with_ai/api-openai/mcp-alura",
+        "python",
+        "/Users/joao/dev/code_with_ai/api-openai/mcp-alura/server.py"
+      ],
+      "env": {
+        "SPREADSHEET_ID": "seu_spreadsheet_id_aqui",
+        "SHEET_NAME": "AutoPeças",
+        "GOOGLE_CREDENTIALS_PATH": "/caminho/para/service_account.json"
+      }
+    }
+  }
+}
