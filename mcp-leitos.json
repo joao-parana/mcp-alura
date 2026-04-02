@@ -1,0 +1,324 @@
+
+{
+  "name": "Agent Leitos - MCP",
+  "nodes": [
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "mode": "list",
+          "value": "gpt-4.1-mini"
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.3,
+      "position": [
+        -1120,
+        -208
+      ],
+      "id": "0d7d6c74-300b-40dc-aabf-611773d3d80a",
+      "name": "OpenAI Chat Model",
+      "credentials": {
+        "openAiApi": {
+          "id": "18VPVBIhyDrB4naB",
+          "name": "OpenAi account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "contextWindowLength": 10
+      },
+      "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
+      "typeVersion": 1.3,
+      "position": [
+        -960,
+        -208
+      ],
+      "id": "ed336de8-6499-4fa8-bef6-f1b76d9b1a67",
+      "name": "Simple Memory"
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "1zt4h2v3ldK3zELNNmvyn02elEB9dHdfXD5q85ZYh2k0",
+          "mode": "list",
+          "cachedResultName": "Base Alura MCP",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1zt4h2v3ldK3zELNNmvyn02elEB9dHdfXD5q85ZYh2k0/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1562350974,
+          "mode": "list",
+          "cachedResultName": "Leitos",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1zt4h2v3ldK3zELNNmvyn02elEB9dHdfXD5q85ZYh2k0/edit#gid=1562350974"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheetsTool",
+      "typeVersion": 4.7,
+      "position": [
+        -800,
+        -208
+      ],
+      "id": "adea6120-aeb2-4ae1-9e9e-3e2b002d25eb",
+      "name": "Base de Dados",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "zngLTJVbFJzXidRV",
+          "name": "Lucas Mendes"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('To', ``, 'string') }}",
+        "subject": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Subject', ``, 'string') }}",
+        "message": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Message', ``, 'string') }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.gmailTool",
+      "typeVersion": 2.1,
+      "position": [
+        -656,
+        -208
+      ],
+      "id": "7ff31c6e-36f6-4d5a-9d3a-a0458b27a84f",
+      "name": "Enviar",
+      "webhookId": "b548b826-3c9e-4af3-855c-78e043274b5d",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "NAo1w6q1jXsEAwoP",
+          "name": "Gmail account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "options": {
+          "systemMessage": "Você é um Agente Hospitalar Integrado, conectado ao MCP Client.\n\nSua função é auxiliar o corpo clínico e a administração hospitalar na gestão de leitos, limpeza e disponibilidade de quartos.\n\n🎯 Instruções:\nSempre utilize o MCP Client para consultar ou atualizar informações em tempo real.\n\nBase de Dados que deve ser utilizada é \"Base de Dados Leitos\"."
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3,
+      "position": [
+        -944,
+        -464
+      ],
+      "id": "aa7c23af-ae93-4540-aa62-8c40aba67033",
+      "name": "Agent Diretoria"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "mode": "list",
+          "value": "gpt-4.1-mini"
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.3,
+      "position": [
+        -288,
+        -256
+      ],
+      "id": "e37bdbf5-0570-4c22-b3a8-36825cd9a206",
+      "name": "OpenAI Chat Model1",
+      "credentials": {
+        "openAiApi": {
+          "id": "18VPVBIhyDrB4naB",
+          "name": "OpenAi account 2"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
+      "typeVersion": 1.3,
+      "position": [
+        -144,
+        -256
+      ],
+      "id": "088da69c-2e0e-4a5e-b4bf-038575b0d64c",
+      "name": "Simple Memory1"
+    },
+    {
+      "parameters": {
+        "options": {
+          "systemMessage": "Você é um Agente Hospitalar Integrado, conectado ao MCP Client.\n\nSua função é auxiliar o corpo clínico e a administração hospitalar na gestão de leitos, limpeza e disponibilidade de quartos.\n\n🎯 Instruções:\nSempre utilize o MCP Client para consultar ou atualizar informações em tempo real.\n\nBase de Dados que deve ser utilizada é \"Base de Dados Leitos\".\n\n"
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3,
+      "position": [
+        -208,
+        -464
+      ],
+      "id": "04fbfda2-215c-4d73-b065-827a6ed76443",
+      "name": "Agent Enfermaria"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chatTrigger",
+      "typeVersion": 1.4,
+      "position": [
+        -384,
+        -464
+      ],
+      "id": "c2817050-6c25-4eda-8095-4deb2107d27b",
+      "name": "When chat message received",
+      "webhookId": "346e51cf-a1ce-400f-923a-7503a5a58e6f"
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "1zt4h2v3ldK3zELNNmvyn02elEB9dHdfXD5q85ZYh2k0",
+          "mode": "list",
+          "cachedResultName": "Base Alura MCP",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1zt4h2v3ldK3zELNNmvyn02elEB9dHdfXD5q85ZYh2k0/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1562350974,
+          "mode": "list",
+          "cachedResultName": "Leitos",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1zt4h2v3ldK3zELNNmvyn02elEB9dHdfXD5q85ZYh2k0/edit#gid=1562350974"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "Tipo_Quarto",
+              "lookupValue": "Enfermaria"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheetsTool",
+      "typeVersion": 4.7,
+      "position": [
+        0,
+        -256
+      ],
+      "id": "ac5fd215-7ff5-4b7d-94b8-8a4bcc21a32f",
+      "name": "Base de Dados1",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "zngLTJVbFJzXidRV",
+          "name": "Lucas Mendes"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "OpenAI Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Agent Diretoria",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Simple Memory": {
+      "ai_memory": [
+        [
+          {
+            "node": "Agent Diretoria",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Base de Dados": {
+      "ai_tool": [
+        [
+          {
+            "node": "Agent Diretoria",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enviar": {
+      "ai_tool": [
+        [
+          {
+            "node": "Agent Diretoria",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Model1": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Agent Enfermaria",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Simple Memory1": {
+      "ai_memory": [
+        [
+          {
+            "node": "Agent Enfermaria",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When chat message received": {
+      "main": [
+        [
+          {
+            "node": "Agent Enfermaria",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Base de Dados1": {
+      "ai_tool": [
+        [
+          {
+            "node": "Agent Enfermaria",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "dce71c8f-695b-4e1d-ab26-2b5be5ec50a8",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "d0e4bbca388d0fff09d4f2fdd4f094bfdb736646443b5555ed601fc250f9ed17"
+  },
+  "id": "hTkfnwTiaXZymwsr",
+  "tags": []
+}
+

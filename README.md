@@ -2,7 +2,14 @@
 
 ## mcp-autopeças com n8n
 
-MCP Server em Python que lê uma aba de uma planilha Google Sheets e expõe os dados de autopeças via protocolo MCP — compatível com Claude Desktop, Claude Code e qualquer MCP Client (inclusive o nó `mcpClientTool` do N8N).
+MCP Server em Python que lê abas de uma planilha Google Sheets e expõe dados via protocolo MCP — compatível com Claude Desktop, Claude Code e qualquer MCP Client (inclusive o nó `mcpClientTool` do N8N).
+
+O servidor cobre dois domínios em um único processo, cada um mapeado para uma aba da mesma planilha:
+
+| Domínio | Aba | Tools |
+|---------|-----|-------|
+| AutoPeças (AutoMax) | `AutoPeças` | 6 tools de catálogo e estoque |
+| Leitos Hospitalares | `Leitos` | 6 tools de gestão e notificação |
 
 ### Pré-requisitos
 
@@ -33,12 +40,17 @@ No [Google Cloud Console](https://console.cloud.google.com):
 cp .env.example .env
 ```
 
-Edite o `.env`:
+Edite o `.env` com no mínimo:
 
 ```env
-SPREADSHEET_ID=1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgVE2upms
+SPREADSHEET_ID=1zt4h2v3ldK3zELNNmvyn02elEB9dHdfXD5q85ZYh2k0
 SHEET_NAME=AutoPeças
+LEITOS_SHEET_NAME=Leitos
 GOOGLE_CREDENTIALS_PATH=/caminho/para/service_account.json
+
+# Necessário apenas para leitos_enviar_notificacao:
+GMAIL_USER=setor@hospital.com.br
+GMAIL_APP_PASSWORD=xxxx_xxxx_xxxx_xxxx
 ```
 
 > O `SPREADSHEET_ID` está na URL da planilha:
@@ -46,13 +58,24 @@ GOOGLE_CREDENTIALS_PATH=/caminho/para/service_account.json
 
 ### Estrutura esperada da planilha
 
+**Aba `AutoPeças`:**
+
 | Código | Nome | Categoria | Marca | Preço | Estoque | Fornecedor | Descrição | Localização |
 |--------|------|-----------|-------|-------|---------|------------|-----------|-------------|
 | F-1023 | Filtro de Óleo | Motor | Bosch | 35.90 | 48 | AutoDist | ... | Prateleira A3 |
 
-> Os nomes das colunas podem ser ajustados no `.env` com `COL_CODIGO`, `COL_NOME`, etc.
+**Aba `Leitos`:**
 
-### Ferramentas disponíveis
+| Leito | Tipo_Quarto | Status | Paciente | Setor | Data_Internacao | Previsao_Alta | Medico | Observacoes |
+|-------|-------------|--------|----------|-------|-----------------|---------------|--------|-------------|
+| A-101 | Enfermaria | Ocupado | João Silva | Ortopedia | 2025-03-28 | 2025-04-05 | Dr. Costa | Pós-op |
+| UTI-03 | UTI | Disponível | — | UTI Adulto | — | — | — | — |
+
+> Os nomes das colunas de ambas as abas podem ser ajustados no `.env` com `COL_*` e `LEITOS_COL_*`.
+
+---
+
+### Ferramentas AutoPeças
 
 | Tool | O que faz |
 |------|-----------|
@@ -63,6 +86,39 @@ GOOGLE_CREDENTIALS_PATH=/caminho/para/service_account.json
 | `autopecas_verificar_estoque` | Estoque por código ou resumo por categoria |
 | `autopecas_listar_marcas` | Fabricantes com contagem de peças |
 
+### Ferramentas Leitos Hospitalares
+
+Mapeamento dos agentes N8N para tools Python:
+
+| Agent N8N | Equivalente MCP |
+|-----------|-----------------|
+| Agent Diretoria (acesso total) | `leitos_listar_leitos`, `leitos_resumo_ocupacao`, `leitos_verificar_disponibilidade`, `leitos_obter_detalhes_leito` |
+| Agent Diretoria (Gmail `Enviar`) | `leitos_enviar_notificacao` |
+| Agent Enfermaria (filtro `Tipo_Quarto=Enfermaria`) | `leitos_listar_enfermaria` |
+
+| Tool | O que faz |
+|------|-----------|
+| `leitos_listar_leitos` | Lista todos os leitos com filtros por tipo, status e setor |
+| `leitos_listar_enfermaria` | Lista apenas leitos de Enfermaria (filtro fixo, como o Agent Enfermaria) |
+| `leitos_verificar_disponibilidade` | Leitos com status Disponível, com resumo por tipo de quarto |
+| `leitos_obter_detalhes_leito` | Dados completos de um leito pelo ID |
+| `leitos_resumo_ocupacao` | Dashboard de ocupação agrupado por tipo de quarto e status |
+| `leitos_enviar_notificacao` | Envia e-mail via Gmail SMTP (equivale ao `gmailTool` do N8N) |
+
+**Status possíveis:** `Disponível` 🟢 · `Ocupado` 🔴 · `Limpeza` 🟡 · `Manutenção` 🔧 · `Reservado` 🔵
+
+**Tipos de quarto:** `Enfermaria` · `UTI` · `Apartamento` · `Semi-Intensivo`
+
+#### Configurando o envio de e-mail
+
+A tool `leitos_enviar_notificacao` usa Gmail SMTP com Senha de App:
+
+1. Ative a verificação em duas etapas na conta Google
+2. Acesse [myaccount.google.com/apppasswords](https://myaccount.google.com/apppasswords)
+3. Crie uma senha para "Email" e cole em `GMAIL_APP_PASSWORD` no `.env`
+
+---
+
 ### Uso no Claude Desktop
 
 Adicione ao `~/Library/Application Support/Claude/claude_desktop_config.json`:
@@ -70,13 +126,16 @@ Adicione ao `~/Library/Application Support/Claude/claude_desktop_config.json`:
 ```json
 {
   "mcpServers": {
-    "autopecas": {
+    "hospital-mcp": {
       "command": "uv",
       "args": ["run", "--project", "/caminho/para/mcp-alura", "python", "server.py"],
       "env": {
-        "SPREADSHEET_ID": "seu_id_aqui",
+        "SPREADSHEET_ID": "1zt4h2v3ldK3zELNNmvyn02elEB9dHdfXD5q85ZYh2k0",
         "SHEET_NAME": "AutoPeças",
-        "GOOGLE_CREDENTIALS_PATH": "/caminho/para/service_account.json"
+        "LEITOS_SHEET_NAME": "Leitos",
+        "GOOGLE_CREDENTIALS_PATH": "/caminho/para/service_account.json",
+        "GMAIL_USER": "setor@hospital.com.br",
+        "GMAIL_APP_PASSWORD": "xxxx_xxxx_xxxx_xxxx"
       }
     }
   }
@@ -86,17 +145,21 @@ Adicione ao `~/Library/Application Support/Claude/claude_desktop_config.json`:
 ### Uso no Claude Code
 
 ```bash
-claude mcp add autopecas -- uv run --project /caminho/para/mcp-alura python server.py
+claude mcp add hospital-mcp -- uv run --project /caminho/para/mcp-alura python server.py
 ```
 
 ### Uso no N8N (MCP Client)
 
-No workflow N8N, configure o nó `MCP Client Tool` com a URL do servidor
-(modo HTTP) ou aponte para o script local (modo stdio via subprocesso).
-O agente AI do N8N acessa as ferramentas automaticamente pelo sistema prompt:
+Configure o nó `MCP Client Tool` apontando para o endpoint do servidor (modo HTTP)
+ou para o script local (modo stdio). Os dois agentes N8N podem compartilhar o mesmo
+servidor MCP — cada um usará as tools adequadas ao seu papel:
 
 ```
-Utilize a Base de Dados AutoPeças dentro do MCP
+# Agent Diretoria
+Utilize o MCP para consultar todos os leitos e enviar notificações por e-mail.
+
+# Agent Enfermaria
+Utilize leitos_listar_enfermaria para ver apenas leitos de Enfermaria.
 ```
 
 ### Teste local
@@ -105,7 +168,7 @@ Utilize a Base de Dados AutoPeças dentro do MCP
 uv run python server.py
 ```
 
-Para inspecionar as tools com o MCP Inspector:
+Para inspecionar as 12 tools com o MCP Inspector:
 
 ```bash
 npx @modelcontextprotocol/inspector uv run python server.py
